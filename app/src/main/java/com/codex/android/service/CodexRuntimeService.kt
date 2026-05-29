@@ -5,10 +5,11 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.os.IBinder
-import android.os.Process
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.codex.android.codex.CodexManager
+import com.codex.android.util.AndroidShellExecutor
+import com.codex.android.util.DevelopmentEnvironment
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -25,15 +26,13 @@ enum class RuntimeState {
     ERROR
 }
 
-
 /**
- * 前台服务，管理 Codex CLI 运行时的完整生命周期。
+ * 前台服务，管理 Codex CLI 运行时生命周期。
  *
- * 职责：
- * - 下载/验证 Codex 二进制文件
- * - 以 exec-server 模式启动 Codex
- * - 监控进程健康状态
- * - 提供 WebSocket 端点
+ * 运行策略：
+ * 1. Termux + Ubuntu 已安装 → 在 Ubuntu proot 中运行
+ * 2. Termux 已安装但无 Ubuntu → 在 Termux 中运行
+ * 3. Termux 未安装 → 尝试直接运行（大概率失败，提示安装）
  */
 class CodexRuntimeService : Service() {
 
@@ -45,10 +44,7 @@ class CodexRuntimeService : Service() {
         private const val ACTION_STOP = "com.codex.android.action.STOP_CODEX"
         private const val ACTION_STATUS = "com.codex.android.action.CODEX_STATUS"
 
-        /** Codex exec-server 默认 WebSocket 端口 */
         const val DEFAULT_WS_PORT = 9877
-
-        /** Codex HTTP 服务器默认端口(Codex Web UI) */
         const val DEFAULT_HTTP_PORT = 19327
 
         private val _state = MutableStateFlow(RuntimeState.STOPPED)
@@ -59,6 +55,9 @@ class CodexRuntimeService : Service() {
 
         private var _wsPort = DEFAULT_WS_PORT
         val wsPort: Int get() = _wsPort
+
+        private var _runningMode: String = "unknown"
+        val runningMode: String get() = _runningMode
 
         fun start(context: Context) {
             val intent = Intent(context, CodexRuntimeService::class.java).apply {
@@ -79,6 +78,7 @@ class CodexRuntimeService : Service() {
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private val logsLock = Any()
     private lateinit var codexManager: CodexManager
+    private lateinit var devEnv: DevelopmentEnvironment
     private var codexProcess: java.lang.Process? = null
     @Volatile
     private var isRunning = false
@@ -86,9 +86,10 @@ class CodexRuntimeService : Service() {
     override fun onCreate() {
         super.onCreate()
         codexManager = CodexManager(this)
+        devEnv = DevelopmentEnvironment(this)
+        AndroidShellExecutor.init(this)
         createNotificationChannel()
         addLog("CodexRuntimeService 已创建")
-        Log.i(TAG, "服务已创建")
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -101,10 +102,7 @@ class CodexRuntimeService : Service() {
                 stopCodex()
                 stopSelf()
             }
-            ACTION_STATUS -> {
-                // 广播状态 - 用于 Activity 查询
-                broadcastStatus()
-            }
+            ACTION_STATUS -> broadcastStatus()
         }
         return START_STICKY
     }
@@ -119,9 +117,6 @@ class CodexRuntimeService : Service() {
         super.onDestroy()
     }
 
-    /**
-     * 启动 Codex 运行时的完整流程
-     */
     private suspend fun startCodex() {
         if (isRunning) {
             addLog("Codex 已在运行中")
@@ -129,7 +124,30 @@ class CodexRuntimeService : Service() {
         }
 
         try {
-            // Step 1: 确保二进制文件就绪
+            // 检测运行环境
+            val envInfo = devEnv.getEnvironmentInfo()
+            val useTermux = devEnv.detectTermux()
+            val useUbuntu = envInfo.hasUbuntu
+
+            _runningMode = when {
+                useUbuntu -> "ubuntu"
+                useTermux -> "termux"
+                else -> "direct"
+            }
+            addLog("运行环境: $_runningMode (${
+                when(_runningMode) {
+                    "ubuntu" -> "Ubuntu proot"
+                    "termux" -> "Termux"
+                    else -> "Android 原生"
+                }
+            })")
+
+            if (!useTermux) {
+                addLog("警告: Termux 未安装，Codex CLI 可能无法运行")
+                addLog("请安装 Termux: https://f-droid.org/packages/com.termux/")
+            }
+
+            // 下载/验证二进制
             _state.value = RuntimeState.STARTING
             addLog("检查 Codex 二进制文件...")
 
@@ -137,11 +155,10 @@ class CodexRuntimeService : Service() {
                 _state.value = RuntimeState.DOWNLOADING
                 addLog("需要下载 Codex CLI...")
 
-                // 使用进度回调下载
                 val success = withContext(Dispatchers.IO) {
                     codexManager.downloadWithProgress { progress, total ->
                         val pct = if (total > 0) (progress * 100 / total) else 0
-                        addLog("下载进度: $pct% ($progress/$total bytes)")
+                        addLog("下载进度: $pct%")
                         updateNotification("下载 Codex... $pct%")
                     }
                 }
@@ -154,8 +171,8 @@ class CodexRuntimeService : Service() {
                 }
 
                 _state.value = RuntimeState.EXTRACTING
-                addLog("解压 Codex 二进制文件...")
-                updateNotification("正在准备 Codex...")
+                addLog("正在解压 Codex CLI...")
+                updateNotification("正在解压 Codex CLI...")
 
                 if (!codexManager.extractBinary()) {
                     _state.value = RuntimeState.ERROR
@@ -163,92 +180,51 @@ class CodexRuntimeService : Service() {
                     updateNotification("Codex 解压失败")
                     return
                 }
+
+                addLog("Codex 二进制就绪: ${codexManager.codexBinary.length()} bytes")
             }
 
-            // Step 2: 验证二进制
-            addLog("验证 Codex 二进制...")
             if (!codexManager.verifyBinary()) {
-                // 若验证失败，尝试重新下载
                 addLog("二进制验证失败，重新下载...")
                 codexManager.cleanup()
-                _state.value = RuntimeState.DOWNLOADING
-                startCodex() // 递归重试
+                _state.value = RuntimeState.ERROR
+                updateNotification("Codex 二进制损坏")
                 return
             }
 
-            // Step 3: 查找空闲端口
+            if (!codexManager.getConfigFile().exists()) {
+                codexManager.createDefaultConfig()
+                addLog("已创建默认配置")
+            }
+
+            codexManager.workspaceDir.mkdirs()
             _wsPort = findFreePort(DEFAULT_WS_PORT)
-            val configDir = codexManager.getConfigDir()
+            addLog("WebSocket 端口: $_wsPort")
 
-            // Step 4: 配置 Codex
-            codexManager.createDefaultConfig()
-
-            // Step 5: 启动 Codex exec-server
+            // 启动 Codex
             _state.value = RuntimeState.STARTING
-            addLog("启动 Codex exec-server (端口: $_wsPort)...")
-            updateNotification("Codex 启动中...")
+            addLog("正在启动 Codex exec-server...")
+            updateNotification("正在启动 Codex...")
 
-            val cmd = buildList {
-                add(codexManager.codexBinary.absolutePath)
-                add("exec-server")
-                add("--listen")
-                add("ws://127.0.0.1:$_wsPort")
-                add("-c")
-                add("approval=never")
-                add("-c")
-                add("sandbox=off")
-                add("-c")
-                add("skip-git-repo-check=true")
-                add("-c")
-                add("model=gpt-4o")
+            when (_runningMode) {
+                "ubuntu" -> startInUbuntu(envInfo)
+                "termux" -> startInTermux()
+                else -> startDirect()
             }
 
-            addLog("执行命令: ${cmd.joinToString(" ")}")
+            // 等待确认
+            delay(3000)
 
-            val pb = ProcessBuilder(cmd)
-                .directory(codexManager.workspaceDir)
-                .redirectErrorStream(true)
-            pb.environment().apply {
-                put("HOME", codexManager.codexDir.absolutePath)
-                put("XDG_CONFIG_HOME", codexManager.getConfigDir().absolutePath)
-                put("CODEX_CONFIG_DIR", codexManager.getConfigDir().absolutePath)
-            }
-
-            codexProcess = pb.start()
-            isRunning = true
-
-            // Step 6: 监控进程输出
-            serviceScope.launch {
-                try {
-                    codexProcess?.inputStream?.bufferedReader()?.use { reader ->
-                        reader.lines().forEach { line ->
-                            addLog("[Codex] $line")
-                            if (line.contains("listening", ignoreCase = true) ||
-                                line.contains("started", ignoreCase = true) ||
-                                line.contains("ready", ignoreCase = true)) {
-                                _state.value = RuntimeState.RUNNING
-                                updateNotification("Codex 已就绪")
-                                broadcastStatus()
-                            }
-                        }
-                    }
-                } catch (e: Exception) {
-                    addLog("Codex 输出流已关闭: ${e.message}")
-                }
-            }
-
-            // Step 7: 等待一小段时间确认启动成功
-            delay(2000)
-
-            // 检查进程是否存活
             if (codexProcess?.isAlive == true) {
                 _state.value = RuntimeState.RUNNING
-                addLog("Codex exec-server 已启动")
+                addLog("Codex exec-server 已启动 ($_runningMode)")
                 updateNotification("Codex 已就绪")
                 broadcastStatus()
             } else {
+                val exitCode = codexProcess?.exitValue() ?: -1
                 _state.value = RuntimeState.ERROR
-                addLog("Codex 进程异常退出")
+                addLog("Codex 进程异常退出 (exit=$exitCode)")
+                addLog("提示: 请确保已安装 Termux 和必要的依赖")
                 updateNotification("Codex 启动失败")
                 isRunning = false
             }
@@ -262,32 +238,149 @@ class CodexRuntimeService : Service() {
     }
 
     /**
-     * 停止 Codex 进程
+     * 在 Ubuntu proot 中启动 Codex
      */
+    private suspend fun startInUbuntu(envInfo: DevelopmentEnvironment.EnvInfo) {
+        addLog("安装 Codex 到 Ubuntu 环境...")
+        devEnv.installBinaryToTermux(codexManager.codexBinary, "codex")
+
+        val startCmd = buildString {
+            append("proot-distro login ubuntu -- bash -c '")
+            append("export HOME=/root && ")
+            append("export CODEX_CONFIG_DIR='/data/data/com.termux/files/home/.codex' && ")
+            append("cd /root && ")
+            append("codex exec-server ")
+            append("--port $_wsPort ")
+            append("--http-port ${_wsPort + 1} ")
+            append("--skip-git-repo-check ")
+            append("2>&1'")
+        }
+
+        codexProcess = devEnv.runInTermux(startCmd)
+        isRunning = true
+
+        serviceScope.launch {
+            try {
+                codexProcess?.inputStream?.bufferedReader()?.use { reader ->
+                    reader.lines().forEach { line ->
+                        addLog("[Codex] $line")
+                        if (line.contains("listening", ignoreCase = true) ||
+                            line.contains("started", ignoreCase = true) ||
+                            line.contains("ready", ignoreCase = true)) {
+                            _state.value = RuntimeState.RUNNING
+                            updateNotification("Codex 已就绪")
+                            broadcastStatus()
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                addLog("Codex 输出流已关闭: ${e.message}")
+            }
+        }
+    }
+
+    /**
+     * 在 Termux 中启动 Codex
+     */
+    private suspend fun startInTermux() {
+        addLog("安装 Codex 到 Termux...")
+        devEnv.installBinaryToTermux(codexManager.codexBinary, "codex")
+
+        val startCmd = buildString {
+            append("cd ~ && ")
+            append("export CODEX_CONFIG_DIR='${codexManager.getConfigDir().absolutePath}' && ")
+            append("codex exec-server ")
+            append("--port $_wsPort ")
+            append("--http-port ${_wsPort + 1} ")
+            append("--skip-git-repo-check ")
+            append("2>&1")
+        }
+
+        codexProcess = devEnv.runInTermux(startCmd)
+        isRunning = true
+
+        serviceScope.launch {
+            try {
+                codexProcess?.inputStream?.bufferedReader()?.use { reader ->
+                    reader.lines().forEach { line ->
+                        addLog("[Codex] $line")
+                        if (line.contains("listening", ignoreCase = true) ||
+                            line.contains("started", ignoreCase = true) ||
+                            line.contains("ready", ignoreCase = true)) {
+                            _state.value = RuntimeState.RUNNING
+                            updateNotification("Codex 已就绪")
+                            broadcastStatus()
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                addLog("Codex 输出流已关闭: ${e.message}")
+            }
+        }
+    }
+
+    /**
+     * 直接启动（Android 原生，失败率高）
+     */
+    private suspend fun startDirect() {
+        addLog("尝试直接在 Android 上运行 Codex...")
+
+        val pb = ProcessBuilder(
+            codexManager.codexBinary.absolutePath,
+            "exec-server",
+            "--port", _wsPort.toString(),
+            "--http-port", (_wsPort + 1).toString()
+        ).apply {
+            environment().putAll(mapOf(
+                "HOME" to codexManager.codexDir.absolutePath,
+                "XDG_CONFIG_HOME" to codexManager.getConfigDir().absolutePath,
+                "CODEX_CONFIG_DIR" to codexManager.getConfigDir().absolutePath,
+                "PATH" to (System.getenv("PATH") ?: "") + ":/system/bin:/system/xbin"
+            ))
+            directory(codexManager.workspaceDir)
+        }
+
+        codexProcess = pb.start()
+        isRunning = true
+
+        serviceScope.launch {
+            try {
+                codexProcess?.inputStream?.bufferedReader()?.use { reader ->
+                    reader.lines().forEach { line ->
+                        addLog("[Codex] $line")
+                        if (line.contains("listening", ignoreCase = true) ||
+                            line.contains("started", ignoreCase = true) ||
+                            line.contains("ready", ignoreCase = true)) {
+                            _state.value = RuntimeState.RUNNING
+                            updateNotification("Codex 已就绪")
+                            broadcastStatus()
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                addLog("Codex 输出流已关闭: ${e.message}")
+            }
+        }
+    }
+
     private fun stopCodex() {
         addLog("正在停止 Codex...")
         isRunning = false
-
         try {
             codexProcess?.destroyForcibly()
             codexProcess?.waitFor(5, java.util.concurrent.TimeUnit.SECONDS)
-        } catch (e: Exception) {
-            Log.w(TAG, "停止 Codex 进程时出错", e)
-        }
-
+        } catch (e: Exception) { Log.w(TAG, "停止 Codex 进程时出错", e) }
         codexProcess = null
         _state.value = RuntimeState.STOPPED
         addLog("Codex 已停止")
     }
 
-    /**
-     * 广播当前状态给 Activity
-     */
     private fun broadcastStatus() {
         val intent = Intent("com.codex.android.CODEX_STATUS").apply {
             putExtra("state", _state.value.name)
             putExtra("wsPort", _wsPort)
             putExtra("isRunning", isRunning)
+            putExtra("runningMode", _runningMode)
         }
         sendBroadcast(intent)
     }
@@ -295,29 +388,20 @@ class CodexRuntimeService : Service() {
     private fun findFreePort(startPort: Int): Int {
         var port = startPort
         while (port < startPort + 100) {
-            try {
-                ServerSocket(port).use { it.close(); return port }
-            } catch (e: Exception) {
-                port++
-            }
+            try { ServerSocket(port).use { it.close(); return port } } catch (e: Exception) { port++ }
         }
         return startPort
     }
 
-    // ========== 通知管理 ==========
-
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
-                CHANNEL_ID,
-                "Codex 运行时",
-                NotificationManager.IMPORTANCE_LOW
+                CHANNEL_ID, "Codex 运行时", NotificationManager.IMPORTANCE_LOW
             ).apply {
                 description = "Codex AI 编码代理后台服务"
                 setShowBadge(false)
             }
-            val manager = getSystemService(NotificationManager::class.java)
-            manager.createNotificationChannel(channel)
+            getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
         }
     }
 
@@ -327,7 +411,6 @@ class CodexRuntimeService : Service() {
             packageManager.getLaunchIntentForPackage(packageName),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
-
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("Codex AI")
             .setContentText(content)
@@ -339,13 +422,11 @@ class CodexRuntimeService : Service() {
     }
 
     private fun updateNotification(content: String) {
-        val manager = getSystemService(NotificationManager::class.java)
-        manager.notify(NOTIFICATION_ID, createNotification(content))
+        getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, createNotification(content))
     }
 
     private fun addLog(message: String) {
-        val timestamp = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault())
-            .format(java.util.Date())
+        val timestamp = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date())
         synchronized(logsLock) { _logs.value = _logs.value + "[$timestamp] $message" }
         Log.d(TAG, message)
     }

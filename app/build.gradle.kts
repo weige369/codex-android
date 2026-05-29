@@ -25,7 +25,7 @@ kotlin {
 }
 
 android {
-    namespace = "com.ai.assistance.operit"
+    namespace = "com.codex.android"
     compileSdk = 36
 
     signingConfigs {
@@ -106,6 +106,13 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
         isCoreLibraryDesugaringEnabled = true
+    }
+
+    applicationVariants.configureEach {
+        outputs.all {
+            val output = this as com.android.build.gradle.internal.api.BaseVariantOutputImpl
+            output.outputFileName = "codex-android-${buildType.name}.apk"
+        }
     }
     buildFeatures {
         compose = true

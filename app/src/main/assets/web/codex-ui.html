@@ -392,6 +392,8 @@
 
 <script>
 // ========== State ==========
+// ========== Mode Detection ==========
+const API_MODE = window.CODEX_API_MODE || false;
 const WS_PORT = window.CODEX_WS_PORT || 9877;
 let ws = null;
 let isConnected = false;
@@ -399,6 +401,31 @@ let isProcessing = false;
 let streamBuffer = '';
 let reconnectTimer = null;
 let messageHistory = [];
+
+// ========== API Mode Tools ==========
+function connectToApi() {
+  console.log('API mode: connected');
+  addSystemMessage('已连接到 Codex API');
+  isConnected = true;
+  updateStatus('connected', 'API 已连接');
+  document.getElementById('prompt-input').disabled = false;
+  document.getElementById('send-btn').disabled = false;
+  document.getElementById('prompt-input').focus();
+}
+
+function sendViaApi(text) {
+  const msg = JSON.stringify({ type: 'prompt', data: text });
+  const result = callBridge('postMessage', msg);
+  return result !== null && result !== false;
+}
+
+function cancelApiStream() {
+  callBridge('postMessage', JSON.stringify({ type: 'cancel' }));
+}
+
+function clearApiHistory() {
+  callBridge('postMessage', JSON.stringify({ type: 'clear' }));
+}
 
 // ========== Bridge (Android <-> JS) ==========
 const bridge = window.CodexAndroidBridge || {};
@@ -657,21 +684,22 @@ function sendPrompt() {
   isProcessing = true;
   updateSendButton();
 
-  // Try WebSocket first
+  // Try API mode first (native bridge)
+  if (API_MODE) {
+    if (sendViaApi(text)) {
+      return;
+    }
+    // API mode fallback to WebSocket
+  }
+
+  // Try WebSocket
   if (isConnected && sendWsMessage(text)) {
     return;
   }
 
-  // Fallback: use Android bridge
-  const msg = JSON.stringify({ type: 'prompt', data: text });
-  const result = callBridge('postMessage', msg);
-  if (result !== false && result !== null) {
-    // Message sent via bridge
-  } else {
-    addErrorMessage('无法发送消息：未连接到 Codex');
-    isProcessing = false;
-    updateSendButton();
-  }
+  addErrorMessage('无法发送消息：未连接到 Codex');
+  isProcessing = false;
+  updateSendButton();
 }
 
 function updateSendButton() {
@@ -718,12 +746,51 @@ document.getElementById('send-btn').addEventListener('click', sendPrompt);
 // ========== Init ==========
 updateStatus('disconnected', '等待 Codex 运行时...');
 
-// Auto-connect if bridge says we're ready
-if (callBridge('isCodexReady')) {
+// Auto-connect
+if (API_MODE) {
+  if (callBridge('isConfigured')) {
+    connectToApi();
+  }
+} else if (callBridge('isCodexReady')) {
   connectWebSocket();
 }
 
-console.log('Codex Android UI loaded. WS port:', WS_PORT);
+// ========== API Stream Handler ==========
+// Called from Android native bridge via evaluateJavascript
+window.onCodexStreamMessage = function(chunk) {
+  if (chunk === '__STREAM_END__') {
+    finishStreaming();
+    return;
+  }
+  if (chunk === '__STREAM_CANCELLED__') {
+    addSystemMessage('已取消');
+    streamBuffer = '';
+    isProcessing = false;
+    updateSendButton();
+    return;
+  }
+  addStreamChunk(chunk);
+};
+
+window.onCodexApiError = function(error) {
+  addErrorMessage('API 错误: ' + error);
+  streamBuffer = '';
+  isProcessing = false;
+  updateSendButton();
+};
+
+// Override updateSendButton for API mode
+const _origUpdateSend = updateSendButton;
+updateSendButton = function() {
+  const btn = document.getElementById('send-btn');
+  if (API_MODE && isConnected) {
+    btn.disabled = isProcessing;
+  } else {
+    _origUpdateSend();
+  }
+};
+
+console.log('Codex Android UI loaded. API mode:', API_MODE, 'WS port:', WS_PORT);
 </script>
 </body>
 </html>

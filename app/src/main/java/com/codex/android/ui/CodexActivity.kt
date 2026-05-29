@@ -7,6 +7,7 @@ import android.content.IntentFilter
 import android.os.Build
 import android.os.Bundle
 import android.util.Log
+import android.webkit.WebView
 import androidx.activity.ComponentActivity
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
@@ -22,17 +23,21 @@ import androidx.compose.ui.platform.ComposeView
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import com.codex.android.bridge.CodexBridge
 import com.codex.android.codex.CodexManager
 import com.codex.android.service.CodexNotifications
 import com.codex.android.service.CodexRuntimeService
 import com.codex.android.service.RuntimeState
 import com.codex.android.ui.about.AboutScreen
+import com.codex.android.ui.environment.DevEnvironmentScreen
 import com.codex.android.ui.files.FileBrowserScreen
 import com.codex.android.ui.github.GitHubImportScreen
 import com.codex.android.ui.mcp.CodexMCPScreen
 import com.codex.android.ui.settings.CodexSettingsScreen
 import com.codex.android.ui.skills.CodexSkillsScreen
 import com.codex.android.ui.workspace.WorkspaceScreen
+import com.codex.android.ui.workspace.forwardStatusToWebView
+import com.codex.android.util.AndroidShellExecutor
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -44,13 +49,16 @@ class CodexActivity : ComponentActivity() {
     }
 
     val codexManager by lazy { CodexManager(this) }
+    val codexBridge by lazy { CodexBridge("ws://127.0.0.1:${CodexRuntimeService.DEFAULT_WS_PORT}") }
 
-    // Runtime state (updated by broadcast receiver)
     private var _runtimeState = RuntimeState.STOPPED
     private var _wsPort = CodexRuntimeService.DEFAULT_WS_PORT
     private var _isRuntimeRunning = false
     private var _wsConnected = false
     private var _currentScreen: Screen = Screen.Workspace
+
+    // WebView 引用，用于状态转发
+    private var _webView: WebView? = null
 
     sealed class Screen {
         data object Workspace : Screen()
@@ -59,6 +67,7 @@ class CodexActivity : ComponentActivity() {
         data object MCP : Screen()
         data object GitHubImport : Screen()
         data object FileBrowser : Screen()
+        data object DevEnvironment : Screen()
         data object About : Screen()
     }
 
@@ -68,7 +77,6 @@ class CodexActivity : ComponentActivity() {
         if (granted) Log.i(TAG, "通知权限已授予")
     }
 
-    // State update callback for Compose
     private var stateListener: ((Screen, RuntimeState, Int, Boolean, Boolean) -> Unit)? = null
 
     private val statusReceiver = object : BroadcastReceiver() {
@@ -86,7 +94,16 @@ class CodexActivity : ComponentActivity() {
             }
             Log.i(TAG, "Codex 状态: $state (端口: $port, 运行: $running)")
 
-            // Notify Compose
+            // 转发状态到 WebView
+            forwardStatusToWebView(_webView, _runtimeState, _wsPort, _isRuntimeRunning)
+
+            // 如果运行时已启动，连接桥接器
+            if (_runtimeState == RuntimeState.RUNNING) {
+                if (codexBridge.connectionState.value != CodexBridge.ConnectionState.CONNECTED) {
+                    codexBridge.connect()
+                }
+            }
+
             stateListener?.invoke(_currentScreen, _runtimeState, _wsPort, _isRuntimeRunning, _wsConnected)
         }
     }
@@ -94,6 +111,9 @@ class CodexActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+
+        // 初始化 Shell 执行器和开发环境
+        AndroidShellExecutor.init(this)
 
         WindowCompat.setDecorFitsSystemWindows(window, false)
         val controller = WindowInsetsControllerCompat(window, window.decorView)
@@ -121,13 +141,12 @@ class CodexActivity : ComponentActivity() {
                         modifier = Modifier.fillMaxSize(),
                         color = MaterialTheme.colorScheme.background
                     ) {
-                        var screen by remember { mutableStateOf<Screen>(_currentScreen) }
-                        var runtimeState by remember { mutableStateOf<RuntimeState>(_runtimeState) }
+                        var screen by remember { mutableStateOf<Screen>(Screen.Workspace) }
+                        var runtimeState by remember { mutableStateOf(_runtimeState) }
                         var wsPort by remember { mutableIntStateOf(_wsPort) }
-                        var isRunning by remember { mutableStateOf<Boolean>(_isRuntimeRunning) }
-                        var wsConnected by remember { mutableStateOf<Boolean>(_wsConnected) }
+                        var isRunning by remember { mutableStateOf(_isRuntimeRunning) }
+                        var wsConnected by remember { mutableStateOf(false) }
 
-                        // Listen for state changes from activity
                         stateListener = { newScreen, newState, port, running, connected ->
                             screen = newScreen
                             runtimeState = newState
@@ -144,10 +163,12 @@ class CodexActivity : ComponentActivity() {
                                     isWsConnected = wsConnected,
                                     workspacePath = codexManager.workspaceDir.absolutePath,
                                     wsPort = wsPort,
+                                    codexBridge = codexBridge,
                                     onOpenSettings = { navigateTo(Screen.Settings) },
                                     onOpenSkills = { navigateTo(Screen.Skills) },
                                     onOpenMCP = { navigateTo(Screen.MCP) },
                                     onOpenGitHub = { navigateTo(Screen.GitHubImport) },
+                                    onOpenDevEnv = { navigateTo(Screen.DevEnvironment) },
                                     onToggleRuntime = {
                                         if (isRunning) {
                                             CodexRuntimeService.stop(this@CodexActivity)
@@ -174,6 +195,9 @@ class CodexActivity : ComponentActivity() {
                                 workspacePath = codexManager.workspaceDir.absolutePath,
                                 onBack = { navigateTo(Screen.Workspace) }
                             )
+                            Screen.DevEnvironment -> DevEnvironmentScreen(
+                                onBack = { navigateTo(Screen.Workspace) }
+                            )
                             Screen.About -> AboutScreen(onBack = { navigateTo(Screen.Workspace) })
                         }
                     }
@@ -185,6 +209,10 @@ class CodexActivity : ComponentActivity() {
     private fun navigateTo(screen: Screen) {
         _currentScreen = screen
         stateListener?.invoke(screen, _runtimeState, _wsPort, _isRuntimeRunning, _wsConnected)
+    }
+
+    fun setWebViewRef(webView: WebView?) {
+        _webView = webView
     }
 
     private fun exportWorkspaceToDownloads(workspacePath: String) {
@@ -224,5 +252,6 @@ class CodexActivity : ComponentActivity() {
     override fun onDestroy() {
         super.onDestroy()
         try { unregisterReceiver(statusReceiver) } catch (_: Exception) {}
+        codexBridge.destroy()
     }
 }

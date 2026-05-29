@@ -18,10 +18,5 @@ dependencyResolutionManagement {
 }
 rootProject.name = "CodexAndroid"
 include(":app")
-include(":dragonbones")
-include(":fbx")
-include(":llama")
-include(":mmd")
-include(":mnn")
 include(":quickjs")
 include(":showerclient")

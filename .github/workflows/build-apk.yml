@@ -8,6 +8,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Init quickjs submodule
+        run: |
+          git submodule update --init quickjs/thirdparty/quickjs
       - name: Setup Java
         uses: actions/setup-java@v4
         with:
@@ -36,10 +39,6 @@ jobs:
           echo "JARs found: $JAR_COUNT"
           JNILIBS_COUNT=$(find app/src/main/jniLibs -type f 2>/dev/null | wc -l)
           echo "jniLibs files: $JNILIBS_COUNT"
-          SUBPACK_COUNT=$(find app/src/main/assets/subpack -type f 2>/dev/null | wc -l)
-          echo "subpack files: $SUBPACK_COUNT"
-          MODELS_COUNT=$(find app/src/main/assets/models -type f 2>/dev/null | wc -l)
-          echo "models files: $MODELS_COUNT"
           if [ "$AAR_COUNT" -eq 0 ] && [ "$JAR_COUNT" -eq 0 ]; then
             echo "WARNING: No AAR or JAR files found in app/libs/!"
           fi

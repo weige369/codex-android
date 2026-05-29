@@ -17,6 +17,13 @@ if (localPropertiesFile.exists()) {
     localProperties.load(FileInputStream(localPropertiesFile))
 }
 
+kotlin {
+    compilerOptions {
+        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+        freeCompilerArgs.add("-Xskip-prerelease-check")
+    }
+}
+
 android {
     namespace = "com.ai.assistance.operit"
     compileSdk = 36
@@ -127,10 +134,6 @@ android {
         }
     }
 
-    compilerOptions {
-        jvmTarget.set(JvmTarget.JVM_17)
-        freeCompilerArgs.add("-Xskip-prerelease-check")
-    }
 }
 
 dependencies {

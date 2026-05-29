@@ -127,9 +127,9 @@ android {
         }
     }
 
-    kotlinOptions {
-        jvmTarget = JvmTarget.JVM_17.target
-        freeCompilerArgs += listOf("-Xskip-prerelease-check")
+    compilerOptions {
+        jvmTarget.set(JvmTarget.JVM_17)
+        freeCompilerArgs.add("-Xskip-prerelease-check")
     }
 }
 
@@ -259,7 +259,7 @@ dependencies {
     implementation(libs.hnswlib.utils)
 
     // Core library desugaring
-    coreLibraryDesugaring(libs.desugar.jdk.libs)
+    coreLibraryDesugaring(libs.desugar.jdk)
 
     // Debug
     debugImplementation(libs.compose.ui.tooling)

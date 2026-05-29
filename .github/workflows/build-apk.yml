@@ -1,0 +1,70 @@
+name: Build Codex APK
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: "temurin"
+          java-version: "21"
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
+      - name: Download binary dependencies
+        run: |
+          gh release download deps --repo weige369/codex-android \
+            --pattern "*.zip" --dir /tmp/deps
+          echo "=== Extracting jniLibs -> app/src/main/jniLibs/ ==="
+          unzip -o /tmp/deps/jniLibs.zip
+          echo "=== Extracting libs -> app/libs/ ==="
+          unzip -o /tmp/deps/libs.zip
+          echo "=== Extracting subpack -> app/src/main/assets/subpack/ ==="
+          unzip -o /tmp/deps/subpack.zip
+          echo "=== Extracting models -> app/src/main/assets/models/ ==="
+          unzip -o /tmp/deps/models.zip
+          echo "=== Verification ==="
+          AAR_COUNT=$(find app/libs -name "*.aar" 2>/dev/null | wc -l)
+          JAR_COUNT=$(find app/libs -name "*.jar" 2>/dev/null | wc -l)
+          echo "AARs found: $AAR_COUNT"
+          echo "JARs found: $JAR_COUNT"
+          JNILIBS_COUNT=$(find app/src/main/jniLibs -type f 2>/dev/null | wc -l)
+          echo "jniLibs files: $JNILIBS_COUNT"
+          SUBPACK_COUNT=$(find app/src/main/assets/subpack -type f 2>/dev/null | wc -l)
+          echo "subpack files: $SUBPACK_COUNT"
+          MODELS_COUNT=$(find app/src/main/assets/models -type f 2>/dev/null | wc -l)
+          echo "models files: $MODELS_COUNT"
+          if [ "$AAR_COUNT" -eq 0 ] && [ "$JAR_COUNT" -eq 0 ]; then
+            echo "WARNING: No AAR or JAR files found in app/libs/!"
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+      - name: Build
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon --stacktrace 2>&1 | tee build.log
+      - name: Upload Build Log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: build.log
+      - name: Upload APK
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Codex-Android-APK
+          path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+      - name: Notify on failure
+        if: failure()
+        run: |
+          echo "❌ Build failed. Check build-log artifact for details."
+          tail -50 build.log

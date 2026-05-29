@@ -1,6 +1,5 @@
 package com.codex.android.provider
 
-import android.content.Context
 import android.util.Log
 import com.codex.android.bridge.CodexBridge
 import com.codex.android.service.CodexRuntimeService
@@ -8,17 +7,18 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import org.json.JSONArray
-import org.json.JSONObject
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
-import java.util.concurrent.atomic.AtomicInteger
 
 /**
- * Codex Agent Provider.
+ * Codex Agent Provider — 增强版。
  *
- * 连接 Codex CLI exec-server 的 WebSocket，提供 Agent 执行能力。
- * 支持流式和非流式 Prompt 执行，以及会话管理。
+ * 参考 Claude Code agents 系统设计：
+ * - 主 Agent + 子 Agent 分发
+ * - 会话隔离管理
+ * - 任务队列与并发控制
+ * - 健康监控与自动重连
  */
 class CodexAgentProvider(
     private val wsPort: Int = CodexRuntimeService.DEFAULT_WS_PORT
@@ -28,15 +28,28 @@ class CodexAgentProvider(
     }
 
     enum class ProviderState {
-        DISCONNECTED,
-        CONNECTING,
-        CONNECTED,
-        ERROR
+        DISCONNECTED, CONNECTING, CONNECTED, ERROR
+    }
+
+    /** Agent 会话信息 */
+    data class AgentSession(
+        val id: String = UUID.randomUUID().toString().take(8),
+        val name: String = "Agent",
+        val status: AgentStatus = AgentStatus.IDLE,
+        val prompt: String = "",
+        val result: String = "",
+        val createdAt: Long = System.currentTimeMillis(),
+        val completedAt: Long? = null
+    )
+
+    enum class AgentStatus {
+        IDLE, RUNNING, COMPLETED, FAILED, CANCELLED
     }
 
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var bridge: CodexBridge? = null
     private val isConnected = AtomicBoolean(false)
+    private var healthCheckJob: Job? = null
 
     private val _state = MutableStateFlow(ProviderState.DISCONNECTED)
     val state: StateFlow<ProviderState> = _state.asStateFlow()
@@ -44,29 +57,31 @@ class CodexAgentProvider(
     private val _currentRequestId = MutableStateFlow<String?>(null)
     val currentRequestId: StateFlow<String?> = _currentRequestId.asStateFlow()
 
+    // Agent 会话管理
+    private val sessions = ConcurrentHashMap<String, AgentSession>()
+    private val _activeSessions = MutableStateFlow<List<AgentSession>>(emptyList())
+    val activeSessions: StateFlow<List<AgentSession>> = _activeSessions.asStateFlow()
+
     var onStreamMessage: ((String) -> Unit)? = null
     var onError: ((String) -> Unit)? = null
+    var onSessionUpdate: ((AgentSession) -> Unit)? = null
 
-    /**
-     * 连接到 Codex exec-server
-     */
     fun connect() {
         if (isConnected.get()) return
         _state.value = ProviderState.CONNECTING
-
         bridge = CodexBridge("ws://127.0.0.1:$wsPort").also { b ->
             b.onConnectionChange = { state ->
                 when (state) {
                     CodexBridge.ConnectionState.CONNECTED -> {
                         isConnected.set(true)
                         _state.value = ProviderState.CONNECTED
+                        startHealthCheck()
                     }
-                    CodexBridge.ConnectionState.ERROR -> {
-                        _state.value = ProviderState.ERROR
-                    }
+                    CodexBridge.ConnectionState.ERROR -> { _state.value = ProviderState.ERROR }
                     CodexBridge.ConnectionState.DISCONNECTED -> {
                         isConnected.set(false)
                         _state.value = ProviderState.DISCONNECTED
+                        stopHealthCheck()
                     }
                     else -> {}
                 }
@@ -75,53 +90,137 @@ class CodexAgentProvider(
         }
     }
 
-    /**
-     * 断开连接
-     */
     fun disconnect() {
+        stopHealthCheck()
         bridge?.destroy()
         bridge = null
         isConnected.set(false)
         _state.value = ProviderState.DISCONNECTED
     }
 
-    /**
-     * 发送 Prompt 并等待完整响应
-     */
     suspend fun execute(prompt: String, stream: Boolean = true): String {
         val b = bridge ?: throw IllegalStateException("未连接到 Codex exec-server")
         return b.executePrompt(prompt, stream)
     }
 
-    /**
-     * 流式发送 Prompt（通过 onStreamMessage 回调接收）
-     */
     fun sendPrompt(prompt: String) {
-        val b = bridge ?: run {
-            onError?.invoke("未连接到 Codex exec-server")
-            return
-        }
+        val b = bridge ?: run { onError?.invoke("未连接到 Codex exec-server"); return }
         b.onMessage = { msg -> onStreamMessage?.invoke(msg) }
         b.sendPrompt(prompt)
     }
 
     /**
-     * 检查状态
+     * 分发子 Agent 任务（类似 Claude Code agents 系统）
      */
+    fun dispatchSubAgent(
+        prompt: String,
+        name: String = "Sub-Agent",
+        onResult: ((String) -> Unit)? = null
+    ): String {
+        val session = AgentSession(
+            name = name,
+            status = AgentStatus.RUNNING,
+            prompt = prompt
+        )
+        sessions[session.id] = session
+        refreshSessions()
+        onSessionUpdate?.invoke(session)
+
+        scope.launch {
+            try {
+                val result = execute(prompt, stream = true)
+                val updated = session.copy(
+                    status = AgentStatus.COMPLETED,
+                    result = result,
+                    completedAt = System.currentTimeMillis()
+                )
+                sessions[session.id] = updated
+                refreshSessions()
+                onSessionUpdate?.invoke(updated)
+                onResult?.invoke(result)
+            } catch (e: Exception) {
+                val failed = session.copy(
+                    status = AgentStatus.FAILED,
+                    result = "错误: ${e.message}",
+                    completedAt = System.currentTimeMillis()
+                )
+                sessions[session.id] = failed
+                refreshSessions()
+                onSessionUpdate?.invoke(failed)
+                onError?.invoke(e.message ?: "Agent 执行失败")
+            }
+        }
+        return session.id
+    }
+
+    /**
+     * 取消 Agent 任务
+     */
+    fun cancelSession(sessionId: String) {
+        val session = sessions[sessionId] ?: return
+        if (session.status == AgentStatus.RUNNING) {
+            val updated = session.copy(
+                status = AgentStatus.CANCELLED,
+                completedAt = System.currentTimeMillis()
+            )
+            sessions[sessionId] = updated
+            refreshSessions()
+            onSessionUpdate?.invoke(updated)
+        }
+    }
+
+    /**
+     * 清理已完成的任务
+     */
+    fun clearCompletedSessions() {
+        val completedIds = sessions.filter { (_, s) ->
+            s.status == AgentStatus.COMPLETED || s.status == AgentStatus.FAILED || s.status == AgentStatus.CANCELLED
+        }.keys
+        completedIds.forEach { sessions.remove(it) }
+        refreshSessions()
+    }
+
+    private fun refreshSessions() {
+        _activeSessions.value = sessions.values.sortedByDescending { it.createdAt }
+    }
+
     suspend fun ping(): Boolean {
         return try {
             val b = bridge ?: return false
             val result = b.getStatus()
             !result.contains("error")
-        } catch (e: Exception) {
-            false
+        } catch (e: Exception) { false }
+    }
+
+    /**
+     * 健康检查 — 每分钟检测连接状态
+     */
+    private fun startHealthCheck() {
+        healthCheckJob?.cancel()
+        healthCheckJob = scope.launch {
+            while (isActive) {
+                delay(60_000)
+                if (isConnected.get()) {
+                    val alive = ping()
+                    if (!alive) {
+                        Log.w(TAG, "健康检查失败，尝试重连...")
+                        disconnect()
+                        connect()
+                    }
+                }
+            }
         }
     }
 
-
+    private fun stopHealthCheck() {
+        healthCheckJob?.cancel()
+        healthCheckJob = null
+    }
 
     fun destroy() {
         disconnect()
+        sessions.clear()
+        refreshSessions()
         scope.cancel()
     }
 }

@@ -39,7 +39,10 @@ fun CodexSkillsScreen(
     var showAddMarketDialog by remember { mutableStateOf(false) }
     var marketUrl by remember { mutableStateOf("") }
     var installedSkills by remember { mutableStateOf(repo.getInstalledSkills()) }
-    var availableSkills by remember { mutableStateOf(repo.getAvailableSkills()) }
+    var availableSkills by remember { mutableStateOf(repo.getInstalledSkills()) }
+    LaunchedEffect(Unit) {
+        availableSkills = repo.getAvailableSkills()
+    }
     var selectedTab by remember { mutableIntStateOf(0) }
 
     Scaffold(

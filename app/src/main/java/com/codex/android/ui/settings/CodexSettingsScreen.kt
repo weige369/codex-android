@@ -1,22 +1,18 @@
 package com.codex.android.ui.settings
 
 import android.content.Context
-import androidx.compose.foundation.background
-import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -29,7 +25,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.codex.android.codex.CodexManager
 import com.codex.android.service.CodexRuntimeService
-import kotlinx.coroutines.launch
 
 /**
  * Codex 设置界面。
@@ -41,7 +36,6 @@ fun CodexSettingsScreen(
     onBack: () -> Unit = {}
 ) {
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
     val codexManager = remember { CodexManager(context) }
 
     // 连接方式
@@ -227,15 +221,13 @@ fun CodexSettingsScreen(
                             } else {
                                 Button(
                                     onClick = {
-                                        scope.launch {
-                                            CodexRuntimeService.start(context)
-                                        }
+                                        CodexRuntimeService.start(context)
                                     },
                                     modifier = Modifier.fillMaxWidth(),
                                     colors = ButtonDefaults.buttonColors(
                                         containerColor = MaterialTheme.colorScheme.primary
                                     )
-                                ) { Text("下载 Codex CLI") }
+                                ) { Text("下载并启动 Codex CLI") }
                             }
                         }
                     }

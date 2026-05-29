@@ -7661,4 +7661,13 @@
     <string name="package_conflict_delete_source">删除源文件</string>
     <string name="package_conflict_delete_success">冲突包源文件已删除</string>
     <string name="package_conflict_delete_failed">删除冲突包源文件失败</string>
+
+    
+    <string name="shortcut_new_chat">新建对话</string>
+    <string name="shortcut_github_import">导入仓库</string>
+    <string name="shortcut_settings">设置</string>
+    <string name="widget_description">快速打开 Codex AI 编码代理</string>
+    <string name="shortcut_new_chat_long">与 Codex 开始新的对话</string>
+    <string name="shortcut_github_import_long">从 GitHub 导入仓库</string>
+    <string name="shortcut_settings_long">打开 Codex 设置</string>
 </resources>

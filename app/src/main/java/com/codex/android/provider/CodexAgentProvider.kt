@@ -118,12 +118,7 @@ class CodexAgentProvider(
         }
     }
 
-    /**
-     * 获取运行时状态
-     */
-    fun runtimeState(): RuntimeState.RuntimeInfo {
-        return RuntimeState.currentInfo
-    }
+
 
     fun destroy() {
         disconnect()

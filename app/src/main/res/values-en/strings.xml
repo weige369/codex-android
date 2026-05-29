@@ -7670,4 +7670,13 @@
     <string name="mention_selector_files_section">Files</string>
     <string name="mention_selector_files_idle">Enter name or path to search workspace items</string>
     <string name="mention_selector_files_empty">No matching files or folders</string>
+
+    
+    <string name="shortcut_new_chat">New Chat</string>
+    <string name="shortcut_github_import">Import Repository</string>
+    <string name="shortcut_settings">Settings</string>
+    <string name="widget_description">Quick access to Codex AI coding agent</string>
+    <string name="shortcut_new_chat_long">Start a new chat with Codex</string>
+    <string name="shortcut_github_import_long">Import repository from GitHub</string>
+    <string name="shortcut_settings_long">Open Codex settings</string>
 </resources>

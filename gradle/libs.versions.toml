@@ -34,6 +34,7 @@ android-gif = "1.2.28"
 image-cropper = "4.5.0"
 exoplayer = "2.19.1"
 material3-window = "1.2.0"
+documentfile = "1.0.1"
 window = "1.1.0"
 webkit = "1.12.1"
 itextg = "5.5.10"
@@ -148,6 +149,7 @@ exoplayer-ui = { group = "com.google.android.exoplayer", name = "exoplayer-ui", 
 
 # UI components
 material3-window = { group = "androidx.compose.material3", name = "material3-window-size-class", version.ref = "material3-window" }
+documentfile = { group = "androidx.documentfile", name = "documentfile", version.ref = "documentfile" }
 window = { group = "androidx.window", name = "window", version.ref = "window" }
 androidx-webkit = { group = "androidx.webkit", name = "webkit", version.ref = "webkit" }
 

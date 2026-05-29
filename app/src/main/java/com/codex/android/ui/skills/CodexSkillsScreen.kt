@@ -17,7 +17,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import org.json.JSONObject
+import com.codex.android.codex.SkillsRepository
+import kotlinx.coroutines.launch
 
 /**
  * Codex Skills 管理界面。
@@ -33,10 +34,12 @@ fun CodexSkillsScreen(
     onAddMarket: (() -> Unit)? = null
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val repo = remember { SkillsRepository(context) }
     var showAddMarketDialog by remember { mutableStateOf(false) }
     var marketUrl by remember { mutableStateOf("") }
-    var installedSkills by remember { mutableStateOf(sampleInstalledSkills) }
-    var availableSkills by remember { mutableStateOf(sampleAvailableSkills) }
+    var installedSkills by remember { mutableStateOf(repo.getInstalledSkills()) }
+    var availableSkills by remember { mutableStateOf(repo.getAvailableSkills()) }
     var selectedTab by remember { mutableIntStateOf(0) }
 
     Scaffold(
@@ -80,20 +83,25 @@ fun CodexSkillsScreen(
 
             when (selectedTab) {
                 0 -> InstalledSkillsTab(
-                    skills = installedSkills,
+                    skills = installedSkills.map { it.toSkillItem() },
                     onRemove = { name ->
-                        installedSkills = installedSkills.filter { it.name != name }
-                        onRemove?.invoke(name)
+                        scope.launch {
+                            repo.removeSkill(name)
+                            installedSkills = repo.getInstalledSkills()
+                            availableSkills = repo.getAvailableSkills()
+                            onRemove?.invoke(name)
+                        }
                     }
                 )
                 1 -> AvailableSkillsTab(
-                    skills = availableSkills,
+                    skills = availableSkills.map { it.toSkillItem() },
                     onInstall = { skill ->
-                        installedSkills = installedSkills + skill.copy(installed = true)
-                        availableSkills = availableSkills.map {
-                            if (it.name == skill.name) it.copy(installed = true) else it
+                        scope.launch {
+                            repo.installSkill(skill.name)
+                            installedSkills = repo.getInstalledSkills()
+                            availableSkills = repo.getAvailableSkills()
+                            onInstall?.invoke(skill.name)
                         }
-                        onInstall?.invoke(skill.name)
                     }
                 )
             }
@@ -121,7 +129,11 @@ fun CodexSkillsScreen(
             confirmButton = {
                 TextButton(onClick = {
                     if (marketUrl.isNotBlank()) {
-                        onAddMarket?.invoke()
+                        scope.launch {
+                            repo.addMarket(marketUrl)
+                            availableSkills = repo.getAvailableSkills()
+                            onAddMarket?.invoke()
+                        }
                         showAddMarketDialog = false
                         marketUrl = ""
                     }
@@ -312,18 +324,10 @@ data class SkillItem(
     val icon: androidx.compose.ui.graphics.vector.ImageVector = Icons.Default.Extension
 )
 
-// 示例 Skill 列表
-private val sampleInstalledSkills = listOf(
-    SkillItem("codex-sub-agents", "子代理系统 - 让 Codex 创建和管理子代理", "1.0.0", true, Icons.Default.AccountTree),
-    SkillItem("imagegen", "图像生成 - 使用 DALL-E 等模型生成图像", "1.0.0", true, Icons.Default.Image),
-)
-
-private val sampleAvailableSkills = listOf(
-    SkillItem("openai-docs", "OpenAI 文档查询 - 获取最新的 OpenAI API 文档", "1.0.0", false, Icons.Default.MenuBook),
-    SkillItem("plugin-creator", "插件创建器 - 创建和管理 Codex 插件", "1.0.0", false, Icons.Default.Build),
-    SkillItem("skill-creator", "Skill 创建器 - 创建自定义 Skills", "1.0.0", false, Icons.Default.AutoAwesome),
-    SkillItem("search-codex-chats", "聊天历史搜索 - 搜索过去的 Codex 对话", "1.0.0", false, Icons.Default.Search),
-    SkillItem("composio-cli", "工具集成 - 集成 200+ 外部工具", "1.0.0", false, Icons.Default.Extension),
-    SkillItem("flightclaw", "航班查询 - 搜索和跟踪航班价格", "1.0.0", false, Icons.Default.Flight),
-    SkillItem("telegram-bridge-send", "Telegram 消息 - 发送 Telegram 通知", "1.0.0", false, Icons.Default.Send),
+/** 将 SkillsRepository.SkillInfo 转换为 SkillItem */
+private fun SkillsRepository.SkillInfo.toSkillItem(): SkillItem = SkillItem(
+    name = name,
+    description = description,
+    version = version,
+    installed = installed
 )

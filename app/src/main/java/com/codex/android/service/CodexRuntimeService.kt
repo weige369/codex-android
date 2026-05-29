@@ -16,6 +16,16 @@ import kotlinx.coroutines.flow.asStateFlow
 import java.io.File
 import java.net.ServerSocket
 
+enum class RuntimeState {
+    STOPPED,
+    DOWNLOADING,
+    EXTRACTING,
+    STARTING,
+    RUNNING,
+    ERROR
+}
+
+
 /**
  * 前台服务，管理 Codex CLI 运行时的完整生命周期。
  *
@@ -40,16 +50,6 @@ class CodexRuntimeService : Service() {
 
         /** Codex HTTP 服务器默认端口(Codex Web UI) */
         const val DEFAULT_HTTP_PORT = 19327
-
-        // 运行时状态
-        enum class RuntimeState {
-            STOPPED,        // 已停止
-            DOWNLOADING,    // 下载中
-            EXTRACTING,     // 解压中
-            STARTING,       // 启动中
-            RUNNING,        // 运行中
-            ERROR           // 错误
-        }
 
         private val _state = MutableStateFlow(RuntimeState.STOPPED)
         val state: StateFlow<RuntimeState> = _state.asStateFlow()

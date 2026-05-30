@@ -25,6 +25,16 @@ class DiagnosticsRunner(private val context: Context) {
 
     companion object {
         private const val TAG = "DiagnosticsRunner"
+
+        /**
+         * 把已捕获的异常压缩成一行可读摘要（类型 + message），
+         * 用于在界面上直接展示失败根因，完整堆栈仍写入 logcat。
+         */
+        fun exceptionSummary(e: Throwable): String {
+            val type = e.javaClass.simpleName.ifBlank { e.javaClass.name }
+            val msg = e.message?.trim()?.takeIf { it.isNotEmpty() }
+            return if (msg != null) "$type: ${msg.take(200)}" else type
+        }
     }
 
     /** 单条测试结果 */
@@ -151,32 +161,45 @@ class DiagnosticsRunner(private val context: Context) {
         )
 
         for ((name, perm) in permissions) {
+            var checkError: Exception? = null
             val granted = try {
                 context.checkSelfPermission(perm) == android.content.pm.PackageManager.PERMISSION_GRANTED
             } catch (e: Exception) {
                 Log.w(TAG, "权限检查失败: $name", e)
+                checkError = e
                 false
             }
             results.add(TestResult(
                 "权限: $name", granted,
-                if (granted) "已授予" else "未授予",
+                when {
+                    granted -> "已授予"
+                    checkError != null -> "检查异常: ${exceptionSummary(checkError)}"
+                    else -> "未授予"
+                },
                 severity = if (granted) Severity.INFO else Severity.WARNING,
-                suggestion = if (!granted) "请授予 $name 权限" else ""
+                suggestion = when {
+                    granted -> ""
+                    checkError != null -> "权限检查时发生异常：${exceptionSummary(checkError)}"
+                    else -> "请授予 $name 权限"
+                }
             ))
         }
 
         // Shizuku 检测
+        var shizukuError: Exception? = null
         val hasShizuku = try {
             Class.forName("moe.shizuku.api.ShizukuApi")
             true
         } catch (e: Exception) {
             Log.w(TAG, "Shizuku API 类存在性检查失败", e)
+            shizukuError = e
             false
         }
         results.add(TestResult(
             "Shizuku API", hasShizuku,
             if (hasShizuku) "可用" else "未安装",
-            severity = Severity.INFO
+            severity = Severity.INFO,
+            suggestion = if (!hasShizuku && shizukuError != null) "类检查失败：${exceptionSummary(shizukuError)}" else ""
         ))
 
         return results
@@ -200,6 +223,7 @@ class DiagnosticsRunner(private val context: Context) {
         ))
 
         // GitHub API 可达性
+        var githubError: Exception? = null
         val githubReachable = try {
             val url = java.net.URL("https://api.github.com")
             val conn = url.openConnection() as java.net.HttpURLConnection
@@ -208,16 +232,22 @@ class DiagnosticsRunner(private val context: Context) {
             conn.responseCode == 200
         } catch (e: Exception) {
             Log.w(TAG, "GitHub API 可达性探测失败", e)
+            githubError = e
             false
         }
         results.add(TestResult(
             "GitHub API 可达", githubReachable,
-            if (githubReachable) "正常" else "连接失败",
+            when {
+                githubReachable -> "正常"
+                githubError != null -> "连接失败: ${exceptionSummary(githubError)}"
+                else -> "连接失败 (HTTP 非 200)"
+            },
             severity = if (githubReachable) Severity.INFO else Severity.ERROR,
             suggestion = if (!githubReachable) "检查网络或防火墙" else ""
         ))
 
         // OpenAI API 可达性
+        var openaiError: Exception? = null
         val openaiReachable = try {
             val url = java.net.URL("https://api.openai.com")
             val conn = url.openConnection() as java.net.HttpURLConnection
@@ -226,11 +256,16 @@ class DiagnosticsRunner(private val context: Context) {
             conn.responseCode in 200..499
         } catch (e: Exception) {
             Log.w(TAG, "OpenAI API 可达性探测失败", e)
+            openaiError = e
             false
         }
         results.add(TestResult(
             "OpenAI API 可达", openaiReachable,
-            if (openaiReachable) "正常" else "连接失败",
+            when {
+                openaiReachable -> "正常"
+                openaiError != null -> "连接失败: ${exceptionSummary(openaiError)}"
+                else -> "连接失败"
+            },
             severity = Severity.INFO
         ))
 
@@ -291,32 +326,41 @@ class DiagnosticsRunner(private val context: Context) {
         }
 
         // HTML 资源检查
+        var htmlError: Exception? = null
         val htmlExists = File(context.filesDir.parentFile?.parentFile, "app/src/main/assets/web/codex-ui.html")
             .exists() || try {
             context.assets.open("web/codex-ui.html").use { true }
         } catch (e: Exception) {
             Log.w(TAG, "Codex UI HTML 资源检查失败", e)
+            htmlError = e
             false
         }
         results.add(TestResult(
             "Codex UI HTML 资源", htmlExists,
             if (htmlExists) "存在" else "缺失",
             severity = if (htmlExists) Severity.INFO else Severity.ERROR,
-            suggestion = if (!htmlExists) "assets/web/codex-ui.html 文件缺失" else ""
+            suggestion = when {
+                htmlExists -> ""
+                htmlError != null -> "assets/web/codex-ui.html 读取失败：${exceptionSummary(htmlError)}"
+                else -> "assets/web/codex-ui.html 文件缺失"
+            }
         ))
 
         // Bridge 对象可用性
+        var bridgeError: Exception? = null
         val bridgeAvailable = try {
             Class.forName("com.codex.android.bridge.CodexBridge")
             true
         } catch (e: Exception) {
             Log.w(TAG, "CodexBridge 类存在性检查失败", e)
+            bridgeError = e
             false
         }
         results.add(TestResult(
             "CodexBridge 类", bridgeAvailable,
             if (bridgeAvailable) "正常" else "缺失",
-            severity = if (bridgeAvailable) Severity.INFO else Severity.ERROR
+            severity = if (bridgeAvailable) Severity.INFO else Severity.ERROR,
+            suggestion = if (!bridgeAvailable && bridgeError != null) "类加载失败：${exceptionSummary(bridgeError)}" else ""
         ))
 
         return results
@@ -340,6 +384,7 @@ class DiagnosticsRunner(private val context: Context) {
         ))
 
         // 写入测试
+        var writeError: Exception? = null
         val writeOk = try {
             val testFile = File(codexDir, ".write_test")
             testFile.writeText("ok")
@@ -348,12 +393,18 @@ class DiagnosticsRunner(private val context: Context) {
             readBack == "ok"
         } catch (e: Exception) {
             Log.e(TAG, "文件写入测试失败", e)
+            writeError = e
             false
         }
         results.add(TestResult(
             "文件写入权限", writeOk,
-            if (writeOk) "正常" else "写入失败",
-            severity = if (writeOk) Severity.INFO else Severity.ERROR
+            when {
+                writeOk -> "正常"
+                writeError != null -> "写入失败: ${exceptionSummary(writeError)}"
+                else -> "写入失败（写入内容与读回内容不一致）"
+            },
+            severity = if (writeOk) Severity.INFO else Severity.ERROR,
+            suggestion = if (!writeOk && writeError != null) "文件写入异常：${exceptionSummary(writeError)}" else ""
         ))
 
         // 可用空间

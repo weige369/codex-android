@@ -29,6 +29,7 @@ import {
 } from '../util/chatApi';
 import {
   clearStoredToken,
+  readRememberConnection,
   readStoredToken,
   writeStoredToken
 } from '../util/ConfigurationStateHolder';
@@ -424,6 +425,7 @@ function finalizeStreamingAssistantMessage(
 export interface ChatViewModelState {
   token: string;
   tokenDraft: string;
+  rememberConnection: boolean;
   boot: WebBootstrapResponse | null;
   theme: WebThemeSnapshot | null;
   characterSelector: WebCharacterSelectorResponse | null;
@@ -471,6 +473,7 @@ export interface ChatViewModelState {
 
 export interface ChatViewModelActions {
   setTokenDraft: (value: string) => void;
+  setRememberConnection: (value: boolean) => void;
   submitToken: () => void;
   createConversation: (options?: { group?: string | null }) => Promise<void>;
   renameConversation: (chat: WebChatSummary, title: string) => Promise<void>;
@@ -553,6 +556,9 @@ export type ChatViewModel = ChatViewModelState & ChatViewModelActions;
 export function useChatViewModel(): ChatViewModel {
   const [token, setToken] = useState<string>(() => readStoredToken());
   const [tokenDraft, setTokenDraft] = useState<string>(() => readStoredToken());
+  const [rememberConnection, setRememberConnection] = useState<boolean>(() =>
+    readRememberConnection()
+  );
   const [boot, setBoot] = useState<WebBootstrapResponse | null>(null);
   const [theme, setTheme] = useState<WebThemeSnapshot | null>(null);
   const [characterSelector, setCharacterSelector] = useState<WebCharacterSelectorResponse | null>(null);
@@ -1013,7 +1019,7 @@ export function useChatViewModel(): ChatViewModel {
       return;
     }
 
-    writeStoredToken(normalizedToken);
+    writeStoredToken(normalizedToken, rememberConnection);
     setToken(normalizedToken);
     setError(null);
   }
@@ -1602,6 +1608,7 @@ export function useChatViewModel(): ChatViewModel {
   return {
     token,
     tokenDraft,
+    rememberConnection,
     boot,
     theme,
     characterSelector,
@@ -1646,6 +1653,7 @@ export function useChatViewModel(): ChatViewModel {
     memorySelector,
     chatThemeId,
     setTokenDraft,
+    setRememberConnection,
     submitToken,
     createConversation,
     renameConversation,

@@ -208,6 +208,24 @@
   color: var(--chat-text-main);
 }
 
+.configuration-screen-remember {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  font-size: 13px;
+  color: var(--chat-text-soft, var(--chat-text-main));
+  cursor: pointer;
+}
+
+.configuration-screen-remember input {
+  width: auto;
+  min-height: 0;
+  margin: 0;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
 .configuration-screen-submit {
   width: 100%;
 }

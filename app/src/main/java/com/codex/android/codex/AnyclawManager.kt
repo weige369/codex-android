@@ -158,7 +158,9 @@ class AnyclawManager(private val context: Context) {
                     results.add(pkg)
                 }
             }
-        } catch (_: Exception) {}
+        } catch (e: Exception) {
+            Log.w(TAG, "在线搜索注册表失败，仅返回本地结果", e)
+        }
 
         _searchResults.value = results
         results
@@ -481,7 +483,10 @@ class AnyclawManager(private val context: Context) {
             _installedPackages.value = installed
             saveInstalled()
             true
-        } catch (e: Exception) { false }
+        } catch (e: Exception) {
+            Log.e(TAG, "添加 CLI 工具失败: $name", e)
+            false
+        }
     }
 
     /**

@@ -2,16 +2,20 @@ import { CopyIcon, KeyIcon, LinkIcon } from '../util/chatIcons';
 
 export function ConfigurationScreen({
   tokenDraft,
+  rememberConnection,
   error,
   suggestedUrl,
   onTokenDraftChange,
+  onRememberConnectionChange,
   onSubmit,
   onCopyUrl
 }: {
   tokenDraft: string;
+  rememberConnection: boolean;
   error: string | null;
   suggestedUrl: string;
   onTokenDraftChange: (value: string) => void;
+  onRememberConnectionChange: (value: boolean) => void;
   onSubmit: () => void;
   onCopyUrl: () => void;
 }) {
@@ -43,12 +47,24 @@ export function ConfigurationScreen({
             <span>Bearer Token</span>
           </label>
           <input
+            autoCapitalize="off"
+            autoComplete="off"
+            autoCorrect="off"
             id="web-chat-token"
             onChange={(event) => onTokenDraftChange(event.target.value)}
             placeholder="输入设置页里显示的 Token"
+            spellCheck={false}
             type="password"
             value={tokenDraft}
           />
+          <label className="configuration-screen-remember">
+            <input
+              checked={rememberConnection}
+              onChange={(event) => onRememberConnectionChange(event.target.checked)}
+              type="checkbox"
+            />
+            <span>记住连接（在此浏览器保存 Token，否则关闭标签页即清除）</span>
+          </label>
         </div>
 
         {error ? <div className="chat-inline-error is-card-error">{error}</div> : null}

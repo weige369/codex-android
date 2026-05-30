@@ -70,8 +70,10 @@ export function AIChatScreen() {
               void navigator.clipboard.writeText(suggestedUrl);
             }
           }}
+          onRememberConnectionChange={viewModel.setRememberConnection}
           onSubmit={viewModel.submitToken}
           onTokenDraftChange={viewModel.setTokenDraft}
+          rememberConnection={viewModel.rememberConnection}
           suggestedUrl={suggestedUrl}
           tokenDraft={viewModel.tokenDraft}
         />

@@ -78,11 +78,11 @@ object AndroidShellExecutor {
 
             val stdoutThread = Thread {
                 try { process.inputStream.bufferedReader().use { r -> r.lines().forEach { stdout.appendLine(it) } } }
-                catch (_: Exception) {}
+                catch (e: Exception) { Log.e(TAG, "读取标准输出失败", e) }
             }
             val stderrThread = Thread {
                 try { process.errorStream.bufferedReader().use { r -> r.lines().forEach { stderr.appendLine(it) } } }
-                catch (_: Exception) {}
+                catch (e: Exception) { Log.e(TAG, "读取错误输出失败", e) }
             }
             stdoutThread.start(); stderrThread.start()
 

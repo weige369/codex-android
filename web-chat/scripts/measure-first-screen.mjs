@@ -189,11 +189,13 @@ if (jsonOnly) {
 if (summaryMode) {
   const sBaseline = loadBaseline();
   const lines = [];
-  lines.push('### web-chat 首屏体积 (first-screen budget)');
-  lines.push('');
-  lines.push(`Build entry chunk: \`${result.buildId}\``);
-  lines.push('');
   if (!sBaseline) {
+    // No baseline yet: there is no pass/fail verdict to show, so keep a neutral
+    // heading and explain how to record one.
+    lines.push('### web-chat 首屏体积 (first-screen budget)');
+    lines.push('');
+    lines.push(`Build entry chunk: \`${result.buildId}\``);
+    lines.push('');
     lines.push(
       '> 尚未记录基线 (no baseline saved). 运行 `npm run measure:baseline` 生成基线后即可显示对比。'
     );
@@ -204,15 +206,27 @@ if (summaryMode) {
     const sPct = sBase ? (sDelta / sBase) * 100 : 0;
     const sSign = sDelta >= 0 ? '+' : '';
     const tol = REGRESSION_TOLERANCE * 100;
-    const status =
-      sPct > tol
-        ? '❌ 超出预算 (over budget)'
-        : sDelta > 0
-          ? '⚠️ 体积增加（仍在预算内）'
-          : '✅ 体积未增加';
+    // Verdict uses the SAME tolerance as the `--check` gate, so the PASS/FAIL
+    // shown here always matches the actual build outcome.
+    const overBudget = sPct > tol;
+    const headingTag = overBudget ? '🚨 FAIL' : '✅ PASS';
+    const banner = overBudget
+      ? `**🚨 超出预算 (over budget): ${sSign}${sPct.toFixed(1)}% > ${tol.toFixed(0)}% 容忍度 — 判定回归。**`
+      : sDelta > 0
+        ? `**✅ 在预算内 (within budget): ${sSign}${sPct.toFixed(1)}%（体积增加但未超预算）。**`
+        : `**✅ 在预算内 (within budget): ${sSign}${sPct.toFixed(1)}%（体积未增加）。**`;
+
+    // Leading PASS/FAIL tag + bolded verdict banner so reviewers see the outcome
+    // at a glance without reading the table below.
+    lines.push(`### web-chat 首屏体积 (first-screen budget) — ${headingTag}`);
+    lines.push('');
+    lines.push(banner);
+    lines.push('');
+    lines.push(`Build entry chunk: \`${result.buildId}\``);
+    lines.push('');
     lines.push(
       `**首屏 JS (gzip): ${fmtKB(sBase)} → ${fmtKB(sCur)} ` +
-        `(${sSign}${fmtKB(sDelta)}, ${sSign}${sPct.toFixed(1)}%)**  ${status}`
+        `(${sSign}${fmtKB(sDelta)}, ${sSign}${sPct.toFixed(1)}%)**`
     );
     lines.push('');
     lines.push(

@@ -1,6 +1,7 @@
 package com.codex.android.security
 
 import android.content.Context
+import org.json.JSONObject
 import java.io.File
 
 /**
@@ -85,5 +86,70 @@ object SecurityPolicy {
     /** Shell 被拒绝时的标准错误响应。 */
     fun shellDeniedResponse(context: Context): String {
         return "{\"success\":false,\"error\":\"当前安全等级（${currentLevel(context)}）禁止执行任意 Shell 命令。如需执行，请在设置中将安全等级调整为「完全」。\"}"
+    }
+
+    /**
+     * 危险命令规则：(正则, 中文原因)。
+     *
+     * 命中任意一条即视为「危险命令」，需要用户显式确认后才执行。
+     * 正则在去掉多余空白并转为小写的命令字符串上匹配。
+     */
+    private val DANGEROUS_RULES: List<Pair<Regex, String>> = listOf(
+        // rm -rf / rm -r / rm -f / rm --recursive --force（递归或强制删除）
+        Regex("(^|[;&|`(]|\\s)rm\\s+(-{1,2}[a-z-]*\\s+)*-{1,2}[a-z-]*(r|f|recursive|force)")
+            to "递归或强制删除文件（rm）",
+        // dd —— 磁盘级写入，可能覆盖整块设备
+        Regex("(^|[;&|`(]|\\s)dd\\s+")
+            to "磁盘级写入（dd）可能覆盖数据",
+        // mkfs / mkswap —— 格式化文件系统
+        Regex("(^|[;&|`(]|\\s)(mkfs|mkswap)")
+            to "格式化文件系统",
+        // chmod -R / chown -R —— 递归修改权限或属主
+        Regex("(^|[;&|`(]|\\s)(chmod|chown)\\s+(-{1,2}[a-z-]*\\s+)*-{1,2}[a-z-]*(r|recursive)")
+            to "递归修改权限/属主",
+        // 向系统关键路径重定向写入
+        Regex(">\\s*/(system|dev|proc|sys|vendor|boot|etc)\\b")
+            to "向系统路径写入（重定向）",
+        // shred / wipe —— 数据擦除
+        Regex("(^|[;&|`(]|\\s)(shred|wipe)\\b")
+            to "数据擦除（shred/wipe）",
+        // fork 炸弹 :(){ :|:& };:
+        Regex(":\\s*\\(\\s*\\)\\s*\\{")
+            to "疑似 fork 炸弹",
+        // 重启 / 关机
+        Regex("(^|[;&|`(]|\\s)(reboot|shutdown|halt|poweroff)\\b")
+            to "重启或关机",
+        // 卸载或清除应用数据
+        Regex("(^|[;&|`(]|\\s)pm\\s+(uninstall|clear)\\b")
+            to "卸载或清除应用数据（pm）",
+        // 设备擦除 / 刷机
+        Regex("(^|[;&|`(]|\\s)fastboot\\b.*(wipe|erase|format)")
+            to "设备擦除（fastboot）",
+    )
+
+    /**
+     * 判断命令是否危险。
+     *
+     * @return 危险时返回中文原因（用于确认弹窗），安全时返回 null。
+     */
+    fun dangerousCommandReason(command: String?): String? {
+        if (command.isNullOrBlank()) return null
+        val normalized = command.replace(Regex("\\s+"), " ").trim().lowercase()
+        if (normalized.isEmpty()) return null
+        for ((regex, reason) in DANGEROUS_RULES) {
+            if (regex.containsMatchIn(normalized)) return reason
+        }
+        return null
+    }
+
+    /** 用户拒绝执行危险命令时的标准响应。 */
+    fun shellRejectedByUserResponse(command: String, reason: String): String {
+        return JSONObject().apply {
+            put("success", false)
+            put("error", "用户已拒绝执行该命令（$reason）。命令未运行。")
+            put("command", command)
+            put("reason", reason)
+            put("rejected", true)
+        }.toString()
     }
 }

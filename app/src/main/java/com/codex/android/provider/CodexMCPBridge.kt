@@ -150,6 +150,13 @@ class CodexMCPBridge(private val context: Context) {
                         return com.codex.android.security.SecurityPolicy.shellDeniedResponse(context)
                     }
                     val command = args["command"] ?: return "{\"error\":\"command required\"}"
+                    // 危险命令需用户显式确认后才执行（在「完全」等级下作为中间安全网）。
+                    com.codex.android.security.SecurityPolicy.dangerousCommandReason(command)?.let { reason ->
+                        val approved = com.codex.android.security.ShellConfirmationManager.requestApproval(command, reason)
+                        if (!approved) {
+                            return com.codex.android.security.SecurityPolicy.shellRejectedByUserResponse(command, reason)
+                        }
+                    }
                     val process = Runtime.getRuntime().exec(arrayOf("/system/bin/sh", "-c", command))
                     val output = process.inputStream.bufferedReader().readText()
                     "{\"success\":true,\"output\":\"${output.replace("\"", "\\\"").take(10000)}\"}"

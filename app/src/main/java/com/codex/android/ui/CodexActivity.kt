@@ -21,6 +21,7 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -32,6 +33,7 @@ import com.codex.android.codex.CodexManager
 import com.codex.android.service.CodexNotifications
 import com.codex.android.service.CodexRuntimeService
 import com.codex.android.service.RuntimeState
+import com.codex.android.security.ShellConfirmationManager
 import com.codex.android.ui.about.AboutScreen
 import com.codex.android.ui.diagnostics.DiagnosticsScreen
 import com.codex.android.ui.environment.DevEnvironmentScreen
@@ -383,6 +385,59 @@ class CodexActivity : ComponentActivity() {
                         confirmButton = {
                             TextButton(onClick = { showMoreMenu = false }) {
                                 Text("关闭")
+                            }
+                        }
+                    )
+                }
+
+                // 危险 Shell 命令确认弹窗
+                val pendingConfirmation by ShellConfirmationManager.pending.collectAsState()
+                pendingConfirmation?.let { confirmation ->
+                    AlertDialog(
+                        onDismissRequest = { ShellConfirmationManager.deny() },
+                        icon = {
+                            Icon(
+                                Icons.Default.Warning,
+                                contentDescription = null,
+                                tint = Color(0xFFE65100)
+                            )
+                        },
+                        title = {
+                            Text("确认执行危险命令", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                        },
+                        text = {
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Text(
+                                    "AI 请求执行可能造成破坏的命令：${confirmation.reason}。",
+                                    fontSize = 14.sp
+                                )
+                                Surface(
+                                    shape = MaterialTheme.shapes.small,
+                                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Text(
+                                        confirmation.command,
+                                        modifier = Modifier.padding(10.dp),
+                                        fontSize = 13.sp,
+                                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
+                                    )
+                                }
+                                Text(
+                                    "仅在你确认安全时再执行。",
+                                    fontSize = 12.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        },
+                        confirmButton = {
+                            TextButton(onClick = { ShellConfirmationManager.approve() }) {
+                                Text("仍然执行", color = Color(0xFFC62828))
+                            }
+                        },
+                        dismissButton = {
+                            TextButton(onClick = { ShellConfirmationManager.deny() }) {
+                                Text("取消")
                             }
                         }
                     )

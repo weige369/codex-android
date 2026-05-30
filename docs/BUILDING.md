@@ -288,6 +288,8 @@ chmod +x ./gradlew
 编译成功后，生成的 APK 文件位于项目目录下的以下路径：  
 app/build/outputs/apk/debug/app-debug.apk
 
+**Android 构建回归检查（PR 必过）：** 同样的 `./gradlew assembleDebug` 编译也通过 GitHub Actions（`.github/workflows/build-apk.yml`）在每个 Pull Request 上运行，对应的检查名为 **`Android APK Build`**，并已在 `main` 分支被设为**必过状态检查（required status check）**：编译失败的 PR 无法合入 `main`，从而把破坏 Android 构建的改动挡在合入之前，而不是等代码进了 `main` 才被发现。该工作流沿用了与首屏检查相同的 git-diff 路径过滤——只有当 PR 改动了与 Android 构建相关的路径（如 `app/**`、各原生模块、Gradle 配置或该工作流文件本身）时才会真正执行完整构建（JDK + Android SDK + NDK 很重），其它 PR 会直接通过这项检查，因此既不会因为路径过滤而把无关 PR 永久卡住，也不会让它们付出完整构建的代价。
+
 ## **7. 常见问题排查**
 
 | 错误信息 | 解决方案 |

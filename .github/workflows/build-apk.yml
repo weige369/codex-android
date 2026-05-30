@@ -1,28 +1,55 @@
-name: Build Codex APK
+name: Android APK Build
 on:
   push:
     branches: [main]
+  pull_request:
   workflow_dispatch:
 jobs:
   build:
+    name: Android APK Build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Detect Android build changes
+        id: changes
+        run: |
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "Non-PR event; running full Android APK build."
+            exit 0
+          fi
+          if git diff --name-only \
+            "${{ github.event.pull_request.base.sha }}" \
+            "${{ github.event.pull_request.head.sha }}" \
+            | grep -Eq '^(app/|quickjs/|fbx/|llama/|mnn/|mmd/|dragonbones/|showerclient/|gradle/|build\.gradle\.kts$|settings\.gradle\.kts$|gradle\.properties$|gradlew$|gradlew\.bat$|\.github/workflows/build-apk\.yml$)'; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "Android-relevant changes detected; running full APK build."
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "No Android-relevant changes in this PR; build check passes without building."
+          fi
       - name: Init quickjs submodule
+        if: steps.changes.outputs.changed == 'true'
         run: |
           git submodule update --init quickjs/thirdparty/quickjs
       - name: Setup Java
+        if: steps.changes.outputs.changed == 'true'
         uses: actions/setup-java@v4
         with:
           distribution: "temurin"
           java-version: "21"
       - name: Setup Android SDK
+        if: steps.changes.outputs.changed == 'true'
         uses: android-actions/setup-android@v3
       - name: Install build-tools 36
+        if: steps.changes.outputs.changed == 'true'
         run: |
           sdkmanager "build-tools;36.0.0" --sdk_root=$ANDROID_HOME || true
           ls $ANDROID_HOME/build-tools/
       - name: Setup AAPT2 path for gradle.properties override
+        if: steps.changes.outputs.changed == 'true'
         run: |
           # Create the expected aapt2 path for gradle.properties override
           sudo mkdir -p /opt/android-sdk/build-tools/36.0.0/
@@ -30,8 +57,10 @@ jobs:
           echo "AAPT2 symlink created:"
           ls -la /opt/android-sdk/build-tools/36.0.0/aapt2
       - name: Setup Gradle
+        if: steps.changes.outputs.changed == 'true'
         uses: gradle/actions/setup-gradle@v3
       - name: Download binary dependencies
+        if: steps.changes.outputs.changed == 'true'
         run: |
           gh release download deps --repo weige369/codex-android \
             --pattern "*.zip" --dir /tmp/deps
@@ -57,24 +86,25 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: bash
       - name: Build
+        if: steps.changes.outputs.changed == 'true'
         run: |
           chmod +x gradlew
           ./gradlew assembleDebug --no-daemon --stacktrace 2>&1 | tee build.log
       - name: Upload Build Log
-        if: always()
+        if: always() && steps.changes.outputs.changed == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: build-log
           path: build.log
       - name: Upload APK
-        if: success()
+        if: success() && steps.changes.outputs.changed == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: Codex-Android-APK
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
       - name: Notify on failure
-        if: failure()
+        if: failure() && steps.changes.outputs.changed == 'true'
         run: |
           echo "❌ Build failed. Check build-log artifact for details."
           tail -50 build.log

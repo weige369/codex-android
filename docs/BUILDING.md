@@ -259,6 +259,8 @@ npm --prefix web-chat run measure:browser:check
 
 容差为 TTI 超基线 20%（且至少 +150 ms）、TBT 超基线 30%（且至少 +50 ms）时判为回归并以非零退出码失败；时延天然比体积抖动大，因此用“百分比与绝对毫秒取较大值”的容差避免误报。**在没有 Chromium / 未安装 `puppeteer-core` 的环境中，该检查会直接跳过（exit 0）而非报错**，所以不会卡住没有浏览器的环境。
 
+这项真机时延检查同样通过 GitHub Actions（`.github/workflows/web-chat-first-screen.yml`）在每个 Pull Request 上自动运行，对应的检查名为 **`Web Chat First-Screen On-Device (TTI/TBT)`**。该任务与上面的体积预算任务共用同一套 `web-chat/**` 路径过滤：只有 PR 改动 `web-chat/**` 时才会真正构建并实测，其它 PR 会直接通过这项检查。CI 任务会用 `browser-actions/setup-chrome` 预装真实的 Chromium 并通过 `CHROMIUM_BIN` 指向它，因此该检查在 CI 中会真正执行实测，而不会因为找不到浏览器而静默跳过。CI 以仓库中提交的 `web-chat/perf/first-screen-browser-baseline.json` 作为基准；当某次时延变慢确属预期时，按下方步骤刷新该基线并随 PR 一并提交即可。
+
 如果某次时延变慢是预期内的（例如有意引入的新功能），请在 `web-chat` 构建之后刷新真机基线，并把更新后的基线文件一并提交：
 
 ```bash

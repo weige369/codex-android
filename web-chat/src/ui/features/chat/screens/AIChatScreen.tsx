@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef } from 'react';
 import { ChatScreenContent } from '../components/ChatScreenContent';
 import { ConfigurationScreen } from './ConfigurationScreen';
 import { prefetchGlassSurface } from '../components/part/GlassSurface';
+import { prefetchMarkdownRenderer } from '../components/part/MarkdownRenderer';
 import { buildChatFontFaceCss, buildChatThemeStyle } from '../util/chatTheme';
 import type { WebThemeSnapshot } from '../util/chatTypes';
 import { useChatViewModel } from '../viewmodel/ChatViewModel';
@@ -24,9 +25,19 @@ function themeUsesGlass(theme: WebThemeSnapshot | null): boolean {
   );
 }
 
+function schedulePrefetch(run: () => void): (() => void) | undefined {
+  if (typeof window.requestIdleCallback === 'function') {
+    const id = window.requestIdleCallback(run);
+    return () => window.cancelIdleCallback?.(id);
+  }
+  const id = window.setTimeout(run, 200);
+  return () => window.clearTimeout(id);
+}
+
 export function AIChatScreen() {
   const viewModel = useChatViewModel();
   const glassPrefetchedRef = useRef(false);
+  const markdownPrefetchedRef = useRef(false);
 
   // Once the user has connected (overlay dismissed), warm the lazy glass chunk
   // during idle time — but only when the active theme actually uses glass — so
@@ -44,17 +55,28 @@ export function AIChatScreen() {
       return;
     }
     glassPrefetchedRef.current = true;
-
-    const run = () => {
+    return schedulePrefetch(() => {
       void prefetchGlassSurface();
-    };
-    if (typeof window.requestIdleCallback === 'function') {
-      const id = window.requestIdleCallback(run);
-      return () => window.cancelIdleCallback?.(id);
-    }
-    const id = window.setTimeout(run, 200);
-    return () => window.clearTimeout(id);
+    });
   }, [viewModel.showConnectionOverlay, viewModel.theme]);
+
+  // Also warm the lazy Markdown renderer once connected, so the first formatted
+  // message renders immediately instead of waiting on the ~44 kB markdown chunk.
+  // Unlike glass this is theme-independent (any message may contain markdown),
+  // but it is likewise gated on the overlay being dismissed so the renderer
+  // never re-enters the connection-overlay critical path.
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+    if (viewModel.showConnectionOverlay || markdownPrefetchedRef.current) {
+      return;
+    }
+    markdownPrefetchedRef.current = true;
+    return schedulePrefetch(() => {
+      void prefetchMarkdownRenderer();
+    });
+  }, [viewModel.showConnectionOverlay]);
   const fontFaceCss = buildChatFontFaceCss(viewModel.theme);
   const chatThemeStyle = useMemo(
     () => buildChatThemeStyle(viewModel.theme, viewModel.chatThemeId),

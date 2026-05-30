@@ -45,9 +45,11 @@ export function ChatScreenContent({
 }) {
   const headerRef = useRef<HTMLDivElement | null>(null);
   const composerHostRef = useRef<HTMLDivElement | null>(null);
-  const [headerHeight, setHeaderHeight] = useState(0);
-  const [composerHeight, setComposerHeight] = useState(0);
-  const [bottomBarHeight, setBottomBarHeight] = useState(0);
+  const measureRafRef = useRef<number | null>(null);
+  const [sizes, setSizes] = useState({ header: 0, composer: 0, bottomBar: 0 });
+  const headerHeight = sizes.header;
+  const composerHeight = sizes.composer;
+  const bottomBarHeight = sizes.bottomBar;
   const [isFloatingMode, setIsFloatingMode] = useState(getIsFloatingMode());
   const [classicSettingsOpen, setClassicSettingsOpen] = useState(false);
   const [activityPanelOpen, setActivityPanelOpen] = useState(false);
@@ -60,67 +62,67 @@ export function ChatScreenContent({
   const activityStats = useMemo(() => countToolCalls(viewModel.messages), [viewModel.messages]);
 
   useEffect(() => {
-    const element = headerRef.current;
-    if (!element || typeof ResizeObserver === 'undefined') {
-      setHeaderHeight(element?.getBoundingClientRect().height ?? 0);
+    const headerEl = headerRef.current;
+    const composerEl = composerHostRef.current;
+    const bottomBarEl =
+      composerEl?.querySelector<HTMLElement>(
+        '.classic-chat-input-section, .agent-chat-input-section'
+      ) ?? null;
+
+    const measure = () => {
+      measureRafRef.current = null;
+      setSizes((prev) => {
+        const next = {
+          header: headerEl?.getBoundingClientRect().height ?? prev.header,
+          composer: composerEl?.getBoundingClientRect().height ?? prev.composer,
+          bottomBar: bottomBarEl?.getBoundingClientRect().height ?? prev.bottomBar
+        };
+        // Skip sub-pixel changes that would otherwise trigger layout-thrash
+        // re-renders and visible jitter during streaming.
+        if (
+          Math.abs(next.header - prev.header) < 0.5 &&
+          Math.abs(next.composer - prev.composer) < 0.5 &&
+          Math.abs(next.bottomBar - prev.bottomBar) < 0.5
+        ) {
+          return prev;
+        }
+        return next;
+      });
+    };
+
+    // Coalesce all observer callbacks within a frame into one measurement so
+    // header/composer/bottom-bar updates land in a single render.
+    const scheduleMeasure = () => {
+      if (measureRafRef.current != null) return;
+      measureRafRef.current = requestAnimationFrame(measure);
+    };
+
+    if (typeof ResizeObserver === 'undefined') {
+      measure();
       return;
     }
 
-    const observer = new ResizeObserver((entries) => {
-      const entry = entries[0];
-      setHeaderHeight(entry?.contentRect.height ?? 0);
-    });
-    observer.observe(element);
-    setHeaderHeight(element.getBoundingClientRect().height);
-    return () => observer.disconnect();
-  }, [overlayMode, viewModel.activeCharacterName, viewModel.historyOpen, viewModel.selectedChatId]);
+    const observer = new ResizeObserver(scheduleMeasure);
+    if (headerEl) observer.observe(headerEl);
+    if (composerEl) observer.observe(composerEl);
+    if (bottomBarEl) observer.observe(bottomBarEl);
+    measure();
 
-  useEffect(() => {
-    const element = composerHostRef.current;
-    if (!element || typeof ResizeObserver === 'undefined') {
-      setComposerHeight(element?.getBoundingClientRect().height ?? 0);
-      return;
-    }
-
-    const observer = new ResizeObserver((entries) => {
-      const entry = entries[0];
-      setComposerHeight(entry?.contentRect.height ?? 0);
-    });
-
-    observer.observe(element);
-    setComposerHeight(element.getBoundingClientRect().height);
-    return () => observer.disconnect();
+    return () => {
+      observer.disconnect();
+      if (measureRafRef.current != null) {
+        cancelAnimationFrame(measureRafRef.current);
+        measureRafRef.current = null;
+      }
+    };
   }, [
+    overlayMode,
+    viewModel.activeCharacterName,
+    viewModel.historyOpen,
+    viewModel.selectedChatId,
     viewModel.activeInputStyle,
     viewModel.attachmentPanelOpen,
     viewModel.error,
-    viewModel.inputProcessingStage,
-    viewModel.isPendingQueueExpanded,
-    viewModel.pendingQueueMessages.length,
-    viewModel.pendingUploads.length
-  ]);
-
-  useEffect(() => {
-    const host = composerHostRef.current;
-    const element =
-      host?.querySelector<HTMLElement>('.classic-chat-input-section, .agent-chat-input-section') ?? null;
-
-    if (!element || typeof ResizeObserver === 'undefined') {
-      setBottomBarHeight(element?.getBoundingClientRect().height ?? 0);
-      return;
-    }
-
-    const observer = new ResizeObserver((entries) => {
-      const entry = entries[0];
-      setBottomBarHeight(entry?.contentRect.height ?? 0);
-    });
-
-    observer.observe(element);
-    setBottomBarHeight(element.getBoundingClientRect().height);
-    return () => observer.disconnect();
-  }, [
-    viewModel.activeInputStyle,
-    viewModel.attachmentPanelOpen,
     viewModel.inputProcessingStage,
     viewModel.isPendingQueueExpanded,
     viewModel.messageInput,

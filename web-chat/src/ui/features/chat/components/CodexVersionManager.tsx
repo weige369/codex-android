@@ -121,6 +121,7 @@ function ReleaseCard({
 }) {
   const [expanded, setExpanded] = useState(false);
   const [logExpanded, setLogExpanded] = useState(false);
+  const logScrollRef = useRef<HTMLPreElement | null>(null);
   const arch = detectArchSupport(release.assets);
   const changelog = trimChangelog(release.body);
   const displayName = release.name?.trim() || release.tag_name;
@@ -128,10 +129,16 @@ function ReleaseCard({
 
   const isInstalling = downloadState === 'pending';
   const statusLabel = installStatus ? getStatusLabel(installStatus.status) : null;
-  const lastLogLine = installStatus?.log
-    ? installStatus.log.split('\n').filter(Boolean).pop() ?? null
-    : null;
+  const logLines = installStatus?.log ? installStatus.log.split('\n').filter(Boolean) : [];
+  const lastLogLine = logLines.length ? logLines[logLines.length - 1] : null;
   const hasError = installStatus?.status === 'error' || installStatus?.status === 'timeout';
+
+  useEffect(() => {
+    const el = logScrollRef.current;
+    if (el) {
+      el.scrollTop = el.scrollHeight;
+    }
+  }, [installStatus?.log, logExpanded]);
 
   const btnLabel = isConnected
     ? arm64Asset
@@ -218,17 +225,22 @@ function ReleaseCard({
               <span className="cvm-install-log-text">{lastLogLine}</span>
             </div>
           )}
-          {installStatus.log && installStatus.log.split('\n').filter(Boolean).length > 1 && (
+          {logLines.length > 0 && (
+            <pre
+              ref={logScrollRef}
+              className={`cvm-install-log-scroll ${logExpanded ? 'is-expanded' : ''}`}
+            >
+              {installStatus.log}
+            </pre>
+          )}
+          {logLines.length > 1 && (
             <button
               className="cvm-install-log-toggle"
               onClick={() => setLogExpanded((v) => !v)}
               type="button"
             >
-              {logExpanded ? '收起日志' : '查看完整日志'}
+              {logExpanded ? '收起日志' : '展开完整日志'}
             </button>
-          )}
-          {logExpanded && installStatus.log && (
-            <pre className="cvm-install-log-full">{installStatus.log}</pre>
           )}
         </div>
       )}

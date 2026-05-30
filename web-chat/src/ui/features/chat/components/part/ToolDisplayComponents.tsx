@@ -85,11 +85,12 @@ function parseProxyJsonParamsToXml(input: string) {
         })
         .join('\n');
     }
+    // Valid JSON but a primitive (string/number/boolean/null) — render it as a
+    // single param instead of falling through to the raw text.
+    return `<param name="value">${escapeXmlText(jsonValueToParamText(parsed))}</param>`;
   } catch {
     return null;
   }
-
-  return null;
 }
 
 function normalizeToolDisplayForStrictProxy(toolName: string, params: string) {

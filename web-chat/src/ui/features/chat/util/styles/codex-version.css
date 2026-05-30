@@ -685,6 +685,30 @@
   margin: 0;
 }
 
+.cvm-install-log-scroll {
+  font-size: 10px;
+  line-height: 1.5;
+  font-family: var(--chat-mono-font, monospace);
+  color: var(--chat-text-main);
+  white-space: pre-wrap;
+  word-break: break-all;
+  background: color-mix(in srgb, var(--chat-surface-container-color) 60%, transparent);
+  border-radius: 6px;
+  padding: 6px 8px;
+  max-height: 88px;
+  overflow-y: auto;
+  margin: 0;
+  scroll-behavior: smooth;
+}
+
+.cvm-install-log-scroll.is-expanded {
+  max-height: 260px;
+}
+
+.cvm-install-progress.is-error .cvm-install-log-scroll {
+  color: #fca5a5;
+}
+
 .cvm-spinner-xs {
   display: inline-block;
   width: 10px;

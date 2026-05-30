@@ -34,52 +34,71 @@ function buildResultPreview(result: string, max = 100): string {
   return cleaned.length > max ? cleaned.slice(0, max) + '…' : cleaned;
 }
 
+interface FlatEntry {
+  block: WebMessageContentBlock;
+  message: WebChatMessage;
+}
+
 function extractToolCalls(messages: WebChatMessage[]): ToolCallRecord[] {
-  const records: ToolCallRecord[] = [];
+  const flat: FlatEntry[] = [];
+
+  function flattenBlocks(bs: WebMessageContentBlock[], message: WebChatMessage) {
+    for (const b of bs) {
+      flat.push({ block: b, message });
+      if (b.children?.length) flattenBlocks(b.children, message);
+    }
+  }
 
   for (const message of messages) {
     const blocks = message.content_blocks;
     if (!blocks?.length) continue;
+    flattenBlocks(blocks, message);
+  }
 
-    const flat: WebMessageContentBlock[] = [];
-    function flattenBlocks(bs: WebMessageContentBlock[]) {
-      for (const b of bs) {
-        flat.push(b);
-        if (b.children?.length) flattenBlocks(b.children);
+  const records: ToolCallRecord[] = [];
+
+  for (let i = 0; i < flat.length; i++) {
+    const { block, message } = flat[i];
+    if (block.kind !== 'xml' || block.tag_name !== 'tool') continue;
+    if (!block.attrs?.name?.trim()) continue;
+
+    const toolName = block.attrs.name.trim();
+    const params = block.content ?? '';
+    const isClosed = block.closed ?? true;
+
+    let result: string | null = null;
+    let isSuccess: boolean | null = null;
+
+    // Scan forward across the whole flattened stream for the matching
+    // tool_result, skipping intermediate text/thinking blocks. Stop at the
+    // next tool call so a result is never paired with the wrong tool.
+    for (let j = i + 1; j < flat.length; j++) {
+      const candidate = flat[j].block;
+      if (
+        candidate.kind === 'xml' &&
+        candidate.tag_name === 'tool' &&
+        candidate.attrs?.name?.trim()
+      ) {
+        break;
       }
-    }
-    flattenBlocks(blocks);
-
-    for (let i = 0; i < flat.length; i++) {
-      const block = flat[i];
-      if (block.kind !== 'xml' || block.tag_name !== 'tool') continue;
-      if (!block.attrs?.name?.trim()) continue;
-
-      const toolName = block.attrs.name.trim();
-      const params = block.content ?? '';
-      const isClosed = block.closed ?? true;
-
-      let result: string | null = null;
-      let isSuccess: boolean | null = null;
-
-      const nextBlock = flat[i + 1];
-      if (nextBlock?.kind === 'xml' && nextBlock?.tag_name === 'tool_result') {
-        const rawResult = nextBlock.content ?? '';
-        const successAttr = nextBlock.attrs?.success ?? nextBlock.attrs?.status ?? '';
-        isSuccess = successAttr.toLowerCase() !== 'false' && successAttr.toLowerCase() !== 'error';
+      if (candidate.kind === 'xml' && candidate.tag_name === 'tool_result') {
+        const rawResult = candidate.content ?? '';
+        const successAttr = candidate.attrs?.success ?? candidate.attrs?.status ?? '';
+        isSuccess =
+          successAttr.toLowerCase() !== 'false' && successAttr.toLowerCase() !== 'error';
         result = rawResult.trim();
-        i++;
+        break;
       }
-
-      records.push({
-        id: `${message.id}-${i}`,
-        toolName,
-        params,
-        result,
-        isSuccess,
-        isStreaming: message.streaming === true && !isClosed && result === null
-      });
     }
+
+    records.push({
+      id: `${message.id}-${i}`,
+      toolName,
+      params,
+      result,
+      isSuccess,
+      isStreaming: message.streaming === true && !isClosed && result === null
+    });
   }
 
   return records;

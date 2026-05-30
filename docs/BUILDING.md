@@ -231,6 +231,23 @@ npm run build:webchat
 ```
 该命令会先执行 `web-chat` 的 React/Vite 构建，再把生成的静态文件同步到 `app/src/main/assets/web-chat`。如果你修改了 `web-chat/src` 下的代码，重新编译 APK 前也需要重新执行一次这一步。
 
+**首屏体积回归检查（自动化校验）：** 项目注册了名为 `webchat-first-screen` 的校验项，会自动执行：
+
+```bash
+npm --prefix web-chat run build && npm --prefix web-chat run measure:check
+```
+
+`measure:check` 会对比 `web-chat/perf/first-screen-baseline.json` 中保存的基线，如果首屏 gzip JS 体积增长超过 5%，校验会以非零退出码失败并给出明确提示，从而在合入前拦截首屏体积回归。
+
+如果某次体积增长是预期内的（例如有意引入的新功能），请在 `web-chat` 构建之后刷新基线，并把更新后的基线文件一并提交：
+
+```bash
+npm --prefix web-chat run build        # 先构建，保证 dist 为最新
+npm --prefix web-chat run measure:baseline
+```
+
+`measure:baseline` 会重写 `web-chat/perf/first-screen-baseline.json` 与 `web-chat/perf/first-screen-report.md`，之后 `measure:check` 便会以新的体积为基准进行比较。
+
 7. **打包 ToolPkg 并同步示例包到应用 assets (关键步骤！):**
 ```bash
 python3 ./sync_example_packages.py

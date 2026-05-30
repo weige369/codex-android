@@ -452,6 +452,38 @@ class DiagnosticsRunner(private val context: Context) {
             ))
         }
 
+        // CPU 架构支持
+        val arch = CodexManager.detectArch()
+        results.add(TestResult(
+            "CPU 架构支持", arch.supported,
+            if (arch.supported) "${arch.abi}（支持）" else "${arch.abi}（无官方产物）",
+            severity = if (arch.supported) Severity.INFO else Severity.ERROR,
+            suggestion = if (!arch.supported) "Codex 仅提供 arm64-v8a / x86_64 产物，当前设备不受支持" else ""
+        ))
+
+        // 已安装版本
+        if (exists) {
+            val installed = codexManager.getInstalledVersion()
+            results.add(TestResult(
+                "Codex 版本", true,
+                installed ?: "未知（手动导入或旧安装）",
+                severity = Severity.INFO,
+                suggestion = if (installed == null) "在设置页重新下载可记录版本号" else ""
+            ))
+        }
+
+        // 直接运行自检（无 Termux 可行性验证）
+        if (exists) {
+            val probe = codexManager.testDirectExecution()
+            results.add(TestResult(
+                "Codex 直接运行自检", probe.success,
+                probe.message,
+                severity = if (probe.success) Severity.INFO else Severity.WARNING,
+                suggestion = if (!probe.success)
+                    "直接运行不可用属正常（Android ${probe.sdkInt} 限制），请使用 Termux + Ubuntu" else ""
+            ))
+        }
+
         // 下载源可达性（逐个检测每个镜像并分别列出状态）
         var anyMirrorReachable = false
         for (mirrorUrl in CodexManager.getAllDownloadUrls()) {

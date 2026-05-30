@@ -278,12 +278,62 @@ class CodexRuntimeService : Service() {
      * 直接启动（Android 原生，失败率高）
      */
     private suspend fun startDirect() {
-        addLog("Codex CLI 需要 Termux 环境来运行")
-        addLog("Codex CLI 二进制编译目标为 Linux musl")
-        addLog("Android 使用 bionic libc，无法直接运行 Linux 二进制")
-        addLog("请在'环境'页面安装 Termux + Ubuntu 后重试")
-        _state.value = RuntimeState.ERROR
-        updateNotification("需要 Termux 环境")
+        addLog("尝试直接运行 Codex（无 Termux）...")
+        // 先做可行性自检：能否直接执行该二进制
+        val probe = codexManager.testDirectExecution()
+        if (!probe.success) {
+            addLog("直接运行不可用: ${probe.message}")
+            addLog("Codex CLI 二进制编译目标为 Linux musl")
+            if (probe.sdkInt >= 29) {
+                addLog("Android ${probe.sdkInt} 禁止执行应用私有目录中的可执行文件（W^X）")
+            }
+            addLog("请在'环境'页面安装 Termux + Ubuntu 后重试")
+            _state.value = RuntimeState.ERROR
+            updateNotification("需要 Termux 环境")
+            return
+        }
+
+        addLog("直接运行自检通过：${probe.message}")
+        try {
+            val process = ProcessBuilder(
+                codexManager.codexBinary.absolutePath,
+                "exec-server",
+                "--port", _wsPort.toString(),
+                "--http-port", (_wsPort + 1).toString(),
+                "--skip-git-repo-check"
+            ).apply {
+                redirectErrorStream(true)
+                environment()["CODEX_CONFIG_DIR"] = codexManager.getConfigDir().absolutePath
+                environment()["HOME"] = codexManager.workspaceDir.absolutePath
+                directory(codexManager.workspaceDir)
+            }.start()
+            codexProcess = process
+            isRunning = true
+            addLog("已直接启动 Codex exec-server（自包含模式）")
+
+            serviceScope.launch {
+                try {
+                    process.inputStream.bufferedReader().use { reader ->
+                        reader.lines().forEach { line ->
+                            addLog("[Codex] $line")
+                            if (line.contains("listening", ignoreCase = true) ||
+                                line.contains("started", ignoreCase = true) ||
+                                line.contains("ready", ignoreCase = true)) {
+                                _state.value = RuntimeState.RUNNING
+                                updateNotification("Codex 已就绪")
+                                broadcastStatus()
+                            }
+                        }
+                    }
+                } catch (e: Exception) {
+                    addLog("Codex 输出流已关闭: ${e.message}")
+                }
+            }
+        } catch (e: Exception) {
+            addLog("直接启动 exec-server 失败: ${e.message}")
+            _state.value = RuntimeState.ERROR
+            updateNotification("Codex 启动失败")
+        }
     }
 
     private fun stopCodex() {

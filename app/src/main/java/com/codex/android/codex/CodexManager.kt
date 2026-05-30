@@ -21,43 +21,95 @@ class CodexManager(private val context: Context) {
         private const val TAG = "CodexManager"
         private const val CODEX_DIR = "codex"
         private const val CODEX_BINARY_NAME = "codex"
+
+        /** 应用内置/已知可用的 Codex 版本。在线检查可发现更高版本并一键升级。 */
         const val CODEX_VERSION = "0.133.0"
 
-        // GitHub Releases 下载 URL (原始)
+        // GitHub 仓库
         private const val GITHUB_REPO = "openai/codex"
-        private const val RELEASE_TAG = "rust-v$CODEX_VERSION"
-        private const val BINARY_ARCHIVE = "codex-aarch64-unknown-linux-musl.tar.gz"
-
-        // GitHub release 资源相对路径（github.com 之后的部分）
-        private const val RELEASE_PATH =
-            "$GITHUB_REPO/releases/download/$RELEASE_TAG/$BINARY_ARCHIVE"
-        private const val GITHUB_DIRECT_URL = "https://github.com/$RELEASE_PATH"
-        private const val GITHUB_FULL_URL = "https://github.com/$RELEASE_PATH"
-
         // Gitee 镜像仓库（国内直连，需镜像同步对应 Release）
         private const val GITEE_REPO = "mirrors/codex"
-        private const val GITEE_MIRROR_URL =
-            "https://gitee.com/$GITEE_REPO/releases/download/$RELEASE_TAG/$BINARY_ARCHIVE"
+
+        // GitHub Releases API（用于在线检查最新版本）
+        private const val RELEASES_API =
+            "https://api.github.com/repos/$GITHUB_REPO/releases?per_page=30"
 
         // 下载连接超时（毫秒）。缩短以便在不可达镜像间快速切换。
         private const val CONNECT_TIMEOUT_MS = 8_000
 
-        // 镜像下载源（中国大陆友好，按可用性从高到低排列）
-        private val MIRROR_URLS = listOf(
-            // 国内 GitHub 加速代理（中国大陆可达，优先尝试）
-            "https://ghfast.top/$GITHUB_FULL_URL",
-            "https://gh-proxy.com/$GITHUB_FULL_URL",
-            "https://ghproxy.net/$GITHUB_FULL_URL",
-            "https://mirror.ghproxy.com/$GITHUB_FULL_URL",
-            // Gitee Release 镜像（国内直连）
-            GITEE_MIRROR_URL,
-            // GitHub 直连（海外网络 / 已配置代理时可用）
-            GITHUB_DIRECT_URL,
-            // 旧版加速镜像（备用）
-            "https://githubfast.com/$RELEASE_PATH",
-        )
+        /**
+         * 当前设备 CPU 架构与对应的 Codex release 产物信息。
+         * @param supported 是否存在可用的官方 musl 产物
+         * @param abi Android ABI 名称（如 arm64-v8a）
+         * @param rustTarget Rust 目标三元组（用于拼接产物名）
+         */
+        data class ArchInfo(val supported: Boolean, val abi: String, val rustTarget: String)
 
-        fun getAllDownloadUrls(): List<String> = MIRROR_URLS
+        /**
+         * 探测当前设备 CPU 架构，返回对应的 Codex 产物信息。
+         * Codex 官方仅提供 aarch64 / x86_64 的 linux-musl 产物，其它架构（如 32 位 armv7）不支持。
+         */
+        fun detectArch(): ArchInfo {
+            val abis = android.os.Build.SUPPORTED_ABIS ?: emptyArray()
+            return when {
+                abis.contains("arm64-v8a") ->
+                    ArchInfo(true, "arm64-v8a", "aarch64-unknown-linux-musl")
+                abis.contains("x86_64") ->
+                    ArchInfo(true, "x86_64", "x86_64-unknown-linux-musl")
+                else ->
+                    ArchInfo(false, abis.firstOrNull() ?: "unknown", "")
+            }
+        }
+
+        private fun archiveName(arch: ArchInfo): String = "codex-${arch.rustTarget}.tar.gz"
+
+        private fun releasePath(version: String, archive: String): String =
+            "$GITHUB_REPO/releases/download/rust-v$version/$archive"
+
+        /**
+         * 为指定版本 + 架构构建全部下载镜像 URL（中国大陆友好，按可用性从高到低排列）。
+         * 架构不支持时返回空列表。
+         */
+        fun buildMirrorUrls(version: String, arch: ArchInfo): List<String> {
+            if (!arch.supported) return emptyList()
+            val archive = archiveName(arch)
+            val ghPath = releasePath(version, archive)
+            val ghUrl = "https://github.com/$ghPath"
+            val giteeUrl =
+                "https://gitee.com/$GITEE_REPO/releases/download/rust-v$version/$archive"
+            return listOf(
+                // 国内 GitHub 加速代理（中国大陆可达，优先尝试）
+                "https://ghfast.top/$ghUrl",
+                "https://gh-proxy.com/$ghUrl",
+                "https://ghproxy.net/$ghUrl",
+                "https://mirror.ghproxy.com/$ghUrl",
+                // Gitee Release 镜像（国内直连）
+                giteeUrl,
+                // GitHub 直连（海外网络 / 已配置代理时可用）
+                ghUrl,
+                // 旧版加速镜像（备用）
+                "https://githubfast.com/$ghPath",
+            )
+        }
+
+        /** 默认版本 + 当前设备架构的下载源（供诊断页探测）。 */
+        fun getAllDownloadUrls(): List<String> = buildMirrorUrls(CODEX_VERSION, detectArch())
+
+        /**
+         * 比较两个语义化版本号（x.y.z）。a>b 返回正数，a<b 返回负数，相等返回 0。
+         * 非法/缺失段按 0 处理。
+         */
+        fun compareVersions(a: String, b: String): Int {
+            fun parts(v: String) = v.trim().removePrefix("v").split('.', '-')
+                .map { it.takeWhile { c -> c.isDigit() }.toIntOrNull() ?: 0 }
+            val pa = parts(a); val pb = parts(b)
+            for (i in 0 until maxOf(pa.size, pb.size)) {
+                val x = pa.getOrElse(i) { 0 }
+                val y = pb.getOrElse(i) { 0 }
+                if (x != y) return x - y
+            }
+            return 0
+        }
     }
 
     // 文件路径
@@ -65,6 +117,8 @@ class CodexManager(private val context: Context) {
     val codexBinary: File get() = File(codexDir, CODEX_BINARY_NAME)
     val archiveFile: File get() = File(codexDir, "$CODEX_BINARY_NAME.tar.gz")
     val workspaceDir: File get() = File(context.filesDir, "workspace")
+    /** 记录已安装二进制的版本号 */
+    private val versionFile: File get() = File(codexDir, ".installed_version")
 
     // 下载进度回调
     var onProgress: ((downloaded: Long, total: Long) -> Unit)? = null
@@ -175,13 +229,21 @@ class CodexManager(private val context: Context) {
      * 下载 Codex CLI（带进度回调）
      */
     suspend fun downloadWithProgress(
+        version: String = CODEX_VERSION,
         onProgressCallback: ((progress: Long, total: Long) -> Unit)? = null
     ): Boolean = withContext(Dispatchers.IO) {
         // 确保目录存在
         codexDir.mkdirs()
 
+        val arch = detectArch()
+        if (!arch.supported) {
+            Log.e(TAG, "当前 CPU 架构不受支持: ${arch.abi}")
+            return@withContext false
+        }
+        val urls = buildMirrorUrls(version, arch)
+
         // 遍历所有镜像源，直到有一个成功
-        for ((index, mirrorUrl) in MIRROR_URLS.withIndex()) {
+        for ((index, mirrorUrl) in urls.withIndex()) {
             try {
                 Log.i(TAG, "尝试下载源 #${index + 1}: $mirrorUrl")
                 val success = downloadFromUrl(mirrorUrl, onProgressCallback)
@@ -251,9 +313,10 @@ class CodexManager(private val context: Context) {
 
         // 创建占位文件提示用户手动下载
         codexBinary.createNewFile()
+        val hint = getAllDownloadUrls().firstOrNull() ?: "（当前 CPU 架构无官方产物）"
         codexBinary.writeText(
             "Codex CLI 自动下载失败。\n" +
-            "请手动下载: MIRROR_URLS[0]\n" +
+            "请手动下载: $hint\n" +
             "然后复制到: ${codexBinary.absolutePath}\n" +
             "并执行: chmod +x ${codexBinary.name}"
         )
@@ -263,7 +326,7 @@ class CodexManager(private val context: Context) {
     /**
      * 解压下载的 Codex 二进制
      */
-    suspend fun extractBinary(): Boolean = withContext(Dispatchers.IO) {
+    suspend fun extractBinary(installedVersion: String = CODEX_VERSION): Boolean = withContext(Dispatchers.IO) {
         try {
             if (!archiveFile.exists()) {
                 Log.e(TAG, "压缩包不存在: ${archiveFile.absolutePath}")
@@ -296,6 +359,7 @@ class CodexManager(private val context: Context) {
                     if (codexFile != null && codexFile.exists()) {
                         codexFile.copyTo(codexBinary, overwrite = true)
                         codexBinary.setExecutable(true)
+                        recordInstalledVersion(installedVersion)
                         Log.i(TAG, "Codex 二进制解压完成: ${codexBinary.length()} bytes")
                         tempDir.deleteRecursively()
                         archiveFile.delete() // 清理压缩包
@@ -307,7 +371,7 @@ class CodexManager(private val context: Context) {
             }
 
             // 如果 tar 命令不可用，使用 Java 方式
-            return@withContext extractWithJava(tempDir)
+            return@withContext extractWithJava(tempDir, installedVersion)
         } catch (e: Exception) {
             Log.e(TAG, "解压失败", e)
             false
@@ -334,7 +398,7 @@ class CodexManager(private val context: Context) {
     /**
      * 使用 Java 的 GZIP + Tar 解压
      */
-    private fun extractWithJava(tempDir: File): Boolean {
+    private fun extractWithJava(tempDir: File, installedVersion: String = CODEX_VERSION): Boolean {
         try {
             val tarFile = File(codexDir, "codex.tar")
             
@@ -384,6 +448,7 @@ class CodexManager(private val context: Context) {
                         }
 
                         codexBinary.setExecutable(true)
+                        recordInstalledVersion(installedVersion)
                         Log.i(TAG, "Codex 二进制提取完成: ${codexBinary.length()} bytes")
 
                         // 清理
@@ -448,6 +513,125 @@ codex-mcp = true
     fun getConfigDir(): File = File(context.filesDir, ".codex").also { it.mkdirs() }
     fun getConfigFile(): File = File(getConfigDir(), "config.toml")
 
+    // ====== 版本记录与升级 ======
+
+    /** 写入已安装版本标记。 */
+    private fun recordInstalledVersion(version: String) {
+        try {
+            codexDir.mkdirs()
+            versionFile.writeText(version.trim())
+        } catch (e: Exception) {
+            Log.w(TAG, "写入版本标记失败", e)
+        }
+    }
+
+    /**
+     * 返回已安装二进制的版本号。
+     * 无标记但二进制存在（如手动导入或旧版本安装）时返回 null（版本未知）。
+     */
+    fun getInstalledVersion(): String? {
+        if (!isInstalled()) return null
+        return try {
+            if (versionFile.exists()) versionFile.readText().trim().ifEmpty { null } else null
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    /**
+     * 在线检查 Codex 最新版本（GitHub Releases API，取首个 rust-v* 标签）。
+     * 网络不可用或解析失败时返回 null。
+     */
+    suspend fun checkLatestVersion(): String? = withContext(Dispatchers.IO) {
+        try {
+            val conn = URL(RELEASES_API).openConnection() as HttpURLConnection
+            conn.connectTimeout = CONNECT_TIMEOUT_MS
+            conn.readTimeout = 15_000
+            conn.instanceFollowRedirects = true
+            conn.setRequestProperty("Accept", "application/vnd.github+json")
+            conn.setRequestProperty("User-Agent", "Codex-Android/1.0")
+            if (conn.responseCode != HttpURLConnection.HTTP_OK) {
+                Log.w(TAG, "检查更新失败: HTTP ${conn.responseCode}")
+                return@withContext null
+            }
+            val body = conn.inputStream.bufferedReader().use { it.readText() }
+            // 在 tag_name 字段中寻找首个 rust-v<semver> 标签（Releases API 按时间倒序返回）
+            val tag = Regex("\"tag_name\"\\s*:\\s*\"(rust-v[0-9][^\"]*)\"")
+                .find(body)?.groupValues?.get(1)
+                ?: return@withContext null
+            tag.removePrefix("rust-v").trim().ifEmpty { null }
+        } catch (e: Exception) {
+            Log.w(TAG, "检查更新异常: ${e.message}")
+            null
+        }
+    }
+
+    /** 给定最新版本号，判断是否有可用更新（与已安装版本比较；未知则与内置版本比较）。 */
+    fun isUpdateAvailable(latest: String): Boolean {
+        val current = getInstalledVersion() ?: CODEX_VERSION
+        return compareVersions(latest, current) > 0
+    }
+
+    /**
+     * 升级到指定版本：下载 → 解压 → 记录版本。成功返回 true。
+     * 失败时保留原有二进制（解压会覆盖，故失败前不删除现有文件）。
+     */
+    suspend fun upgradeTo(
+        version: String,
+        onProgressCallback: ((progress: Long, total: Long) -> Unit)? = null
+    ): Boolean = withContext(Dispatchers.IO) {
+        if (!downloadWithProgress(version, onProgressCallback)) return@withContext false
+        if (!extractBinary(version)) return@withContext false
+        verifyBinary()
+    }
+
+    // ====== 直接运行自检（无 Termux 可行性验证） ======
+
+    /** 直接执行自检结果。 */
+    data class DirectExecResult(
+        val success: Boolean,
+        val message: String,
+        val sdkInt: Int = android.os.Build.VERSION.SDK_INT
+    )
+
+    /**
+     * 在不依赖 Termux 的情况下，尝试直接执行 codex 二进制（`codex --version`）以验证可行性。
+     *
+     * 注意：Android 10+（API 29+）禁止执行应用私有数据目录中的可执行文件（W^X 限制），
+     * 这通常会导致 EACCES。该自检用于在真机上给出确切结论，无法在构建环境中预判。
+     */
+    fun testDirectExecution(): DirectExecResult {
+        val sdk = android.os.Build.VERSION.SDK_INT
+        if (!isInstalled()) {
+            return DirectExecResult(false, "二进制未安装，无法自检", sdk)
+        }
+        return try {
+            val process = ProcessBuilder(codexBinary.absolutePath, "--version")
+                .redirectErrorStream(true)
+                .start()
+            // 先等待超时，避免在挂起的进程上 readText() 无限阻塞。
+            // `--version` 输出很小，不会撑满管道缓冲区导致写阻塞。
+            val finished = process.waitFor(15, java.util.concurrent.TimeUnit.SECONDS)
+            if (!finished) {
+                process.destroyForcibly()
+                return DirectExecResult(false, "执行超时（15s 内无响应）", sdk)
+            }
+            val output = process.inputStream.bufferedReader().use { it.readText() }.trim()
+            val exit = process.exitValue()
+            if (exit == 0) {
+                DirectExecResult(true, "可直接运行：${output.take(120)}", sdk)
+            } else {
+                DirectExecResult(false, "退出码 $exit：${output.take(160)}", sdk)
+            }
+        } catch (e: IOException) {
+            // 典型为 EACCES（W^X）或 ENOEXEC（架构/libc 不兼容）
+            val hint = if (sdk >= 29) "（Android $sdk 限制执行私有目录文件，需 Termux/proot 或将二进制打入 native 库）" else ""
+            DirectExecResult(false, "无法直接执行: ${e.message}$hint", sdk)
+        } catch (e: Exception) {
+            DirectExecResult(false, "自检异常: ${e.message}", sdk)
+        }
+    }
+
     /**
      * 清理下载文件
      */
@@ -455,6 +639,7 @@ codex-mcp = true
         try {
             archiveFile.delete()
             codexBinary.delete()
+            versionFile.delete()
             Log.i(TAG, "已清理 Codex 文件")
         } catch (e: Exception) {
             Log.w(TAG, "清理失败", e)

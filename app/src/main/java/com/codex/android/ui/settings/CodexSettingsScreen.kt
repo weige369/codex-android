@@ -29,6 +29,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import com.codex.android.codex.CodexManager
 import com.codex.android.service.CodexRuntimeService
 import com.codex.android.ui.theme.*
+import kotlinx.coroutines.launch
 
 /**
  * Codex settings screen.
@@ -283,6 +284,16 @@ fun CodexSettingsScreen(
                 }
             }
 
+            // ===== 版本检查与升级 =====
+            if (isInstalled) {
+                item {
+                    SectionHeader("版本与升级")
+                }
+                item {
+                    CodexUpdateCard(codexManager = codexManager, context = context)
+                }
+            }
+
             // ===== Feature Navigation =====
             // ===== 手动导入二进制 =====
             item {
@@ -456,6 +467,115 @@ private fun SettingsNavItem(
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.size(18.dp)
             )
+        }
+    }
+}
+
+@Composable
+private fun CodexUpdateCard(
+    codexManager: CodexManager,
+    context: Context
+) {
+    val scope = rememberCoroutineScope()
+    var installedVersion by remember { mutableStateOf(codexManager.getInstalledVersion()) }
+    var checking by remember { mutableStateOf(false) }
+    var latestVersion by remember { mutableStateOf<String?>(null) }
+    var statusMsg by remember { mutableStateOf<String?>(null) }
+    var upgrading by remember { mutableStateOf(false) }
+    var progressPct by remember { mutableStateOf(0) }
+
+    val updateAvailable = latestVersion?.let { codexManager.isUpdateAvailable(it) } == true
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant
+        )
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column {
+                    Text("已安装版本", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(
+                        installedVersion?.let { "v$it" } ?: "未知（手动导入）",
+                        fontWeight = FontWeight.Medium,
+                        fontSize = 14.sp
+                    )
+                }
+                if (!upgrading) {
+                    OutlinedButton(
+                        onClick = {
+                            checking = true
+                            statusMsg = "正在检查..."
+                            scope.launch {
+                                val latest = codexManager.checkLatestVersion()
+                                checking = false
+                                if (latest == null) {
+                                    statusMsg = "无法检查更新（网络不可用或被限制）"
+                                } else {
+                                    latestVersion = latest
+                                    statusMsg = if (codexManager.isUpdateAvailable(latest))
+                                        "发现新版本 v$latest" else "已是最新（v$latest）"
+                                }
+                            }
+                        },
+                        enabled = !checking
+                    ) {
+                        Text(if (checking) "检查中..." else "检查更新")
+                    }
+                }
+            }
+
+            statusMsg?.let {
+                Spacer(Modifier.height(8.dp))
+                Text(it, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+
+            if (updateAvailable && !upgrading) {
+                Spacer(Modifier.height(12.dp))
+                Button(
+                    onClick = {
+                        val target = latestVersion ?: return@Button
+                        upgrading = true
+                        progressPct = 0
+                        statusMsg = "正在升级到 v$target..."
+                        scope.launch {
+                            val ok = codexManager.upgradeTo(target) { progress, total ->
+                                progressPct = if (total > 0) (progress * 100 / total).toInt() else 0
+                            }
+                            upgrading = false
+                            if (ok) {
+                                statusMsg = "升级成功，已安装 v$target"
+                                installedVersion = codexManager.getInstalledVersion()
+                                latestVersion = null
+                                Toast.makeText(context, "Codex 已升级到 v$target", Toast.LENGTH_LONG).show()
+                            } else {
+                                statusMsg = "升级失败，原版本保持不变"
+                                Toast.makeText(context, "升级失败，请检查网络后重试", Toast.LENGTH_LONG).show()
+                            }
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(containerColor = CodexPrimary)
+                ) {
+                    Text("升级到 v${latestVersion}")
+                }
+            }
+
+            if (upgrading) {
+                Spacer(Modifier.height(12.dp))
+                Text("升级中... $progressPct%", fontSize = 13.sp)
+                Spacer(Modifier.height(4.dp))
+                LinearProgressIndicator(
+                    progress = { progressPct / 100f },
+                    modifier = Modifier.fillMaxWidth().height(4.dp),
+                    color = CodexPrimary
+                )
+            }
         }
     }
 }

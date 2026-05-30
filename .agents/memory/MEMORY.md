@@ -1,4 +1,1 @@
-- [Web-chat interface themes](web-chat-themes.md) — selectable local themes layer over server theme via TS preset merge + data-theme CSS; inline vars beat stylesheets.
-- [Web-chat first-screen perf](web-chat-first-screen-perf.md) — first-screen cost: static byte analyzer (`measure`) + real-Chromium variant (`measure:browser`); regenerate baselines after intentional changes.
-- [Security level tiers](security-level-tiers.md) — 安全/标准/完全 switch; keep tiers monotonic (no file-sandbox claim at a tier that allows shell); gate both AnyclawManager + CodexMCPBridge tool paths.
-- [Headless Chromium in sandbox](headless-browser-in-sandbox.md) — bash tool SIGKILLs headless Chromium loading real pages; run it via a one-shot workflow instead.
+- [Codex binary runtime](codex-binary-runtime.md) — Android 10+ W^X blocks exec from data dir; codex only ships aarch64/x86_64 musl; runtime upgrade needs no APK rebuild; waitFor before readText.

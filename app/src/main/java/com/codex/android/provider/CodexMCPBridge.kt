@@ -2,6 +2,7 @@ package com.codex.android.provider
 
 import android.content.Context
 import android.util.Log
+import com.codex.android.codex.AnyclawManager
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -12,11 +13,11 @@ import java.io.File
 /**
  * Codex MCP 桥接器 — 增强版。
  *
- * 参照 opencode MCP 客户端设计：
- * - OAuth 认证支持
- * - 服务器自动发现
- * - 工具注册与热更新
- * - 连接健康监控
+ * 集成 Anyclaw 工具注册表：
+ * - 工具注册与发现
+ * - Anyclaw 工具包管理
+ * - MCP 协议兼容
+ * - 工具执行桥接
  */
 class CodexMCPBridge(private val context: Context) {
 
@@ -42,13 +43,15 @@ class CodexMCPBridge(private val context: Context) {
         val url: String = "",
         val state: ServerState = ServerState.STOPPED,
         val tools: List<MCPTool> = emptyList(),
-        val authType: String = "none",  // none, oauth, apikey
+        val authType: String = "none",
         val isBuiltin: Boolean = false
     )
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val configDir = File(context.filesDir, MCP_CONFIG_DIR)
     private val configFile = File(configDir, MCP_CONFIG_FILE)
+
+    val anyclawManager = AnyclawManager(context)
 
     private val _state = MutableStateFlow(ServerState.STOPPED)
     val state: StateFlow<ServerState> = _state.asStateFlow()
@@ -74,9 +77,13 @@ class CodexMCPBridge(private val context: Context) {
 
         scope.launch {
             try {
-                // 启动内置 MCP 服务器
+                // 注册内置 Android 系统工具
                 addLog("注册 Android 系统工具...")
                 registerBuiltinTools()
+
+                // 注册 Anyclaw 工具包
+                addLog("加载 Anyclaw 工具注册表...")
+                registerAnyclawTools()
 
                 _state.value = ServerState.RUNNING
                 addLog("MCP 服务器已就绪 (${_tools.value.size} 个工具)")
@@ -92,6 +99,62 @@ class CodexMCPBridge(private val context: Context) {
         _state.value = ServerState.STOPPED
         _tools.value = emptyList()
         addLog("MCP 服务器已停止")
+    }
+
+    /**
+     * 刷新 Anyclaw 注册表
+     */
+    fun refreshAnyclawRegistry(callback: (Boolean) -> Unit = {}) {
+        scope.launch {
+            try {
+                anyclawManager.refreshRegistry()
+                registerAnyclawTools()
+                addLog("Anyclaw 注册表已刷新 (${_tools.value.size} 个工具)")
+                callback(true)
+            } catch (e: Exception) {
+                addLog("刷新 Anyclaw 注册表失败: ${e.message}")
+                callback(false)
+            }
+        }
+    }
+
+    /**
+     * 通过 MCP 执行工具
+     */
+    suspend fun executeTool(toolName: String, args: Map<String, String> = emptyMap()): String {
+        val tool = _tools.value.find { it.name == toolName }
+            ?: return "{\"error\":\"tool not found: $toolName\"}"
+
+        return when {
+            tool.name.startsWith("anyclaw_") || tool.serverId == "anyclaw" -> {
+                anyclawManager.executeTool(toolName.removePrefix("anyclaw_"), args)
+            }
+            tool.serverId == "builtin" -> {
+                executeBuiltinTool(tool.name, args)
+            }
+            else -> "{\"error\":\"unknown server: ${tool.serverId}\"}"
+        }
+    }
+
+    private suspend fun executeBuiltinTool(toolName: String, args: Map<String, String>): String {
+        return try {
+            when (toolName) {
+                "android_read_file" -> {
+                    val path = args["path"] ?: return "{\"error\":\"path required\"}"
+                    val content = File(path).readText()
+                    "{\"success\":true,\"content\":\"${content.replace("\"", "\\\"").take(10000)}\"}"
+                }
+                "android_shell" -> {
+                    val command = args["command"] ?: return "{\"error\":\"command required\"}"
+                    val process = Runtime.getRuntime().exec(arrayOf("/system/bin/sh", "-c", command))
+                    val output = process.inputStream.bufferedReader().readText()
+                    "{\"success\":true,\"output\":\"${output.replace("\"", "\\\"").take(10000)}\"}"
+                }
+                else -> "{\"error\":\"not implemented: $toolName\"}"
+            }
+        } catch (e: Exception) {
+            "{\"error\":\"${e.message}\"}"
+        }
     }
 
     /**
@@ -155,11 +218,24 @@ class CodexMCPBridge(private val context: Context) {
             MCPTool("android_screenshot", "截取屏幕", "builtin"),
             MCPTool("android_get_battery", "获取电池状态", "builtin"),
             MCPTool("android_get_network", "获取网络状态", "builtin"),
-            MCPTool("android_get_apps", "获取已安装应用列表", "builtin"),
-            MCPTool("android_notification", "发送通知", "builtin"),
-            MCPTool("android_toast", "显示 Toast", "builtin"),
         )
         _tools.value = builtinTools
+    }
+
+    private fun registerAnyclawTools() {
+        val anyclawTools = anyclawManager.installedPackages.value.flatMap { pkg ->
+            pkg.tools.map { tool ->
+                MCPTool(
+                    name = "anyclaw_${pkg.id}_${tool.name}",
+                    description = "[${pkg.name}] ${tool.description}",
+                    serverId = "anyclaw"
+                )
+            }
+        }
+        val allTools = _tools.value.toMutableList()
+        allTools.removeAll { it.serverId == "anyclaw" }
+        allTools.addAll(anyclawTools)
+        _tools.value = allTools
     }
 
     private fun loadServers() {
@@ -211,5 +287,10 @@ class CodexMCPBridge(private val context: Context) {
 
     private fun addLog(message: String) {
         _logs.value += "[${java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date())}] $message\n"
+    }
+
+    fun destroy() {
+        anyclawManager.destroy()
+        scope.cancel()
     }
 }

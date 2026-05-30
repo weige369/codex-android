@@ -86,6 +86,8 @@ android {
             }
         }
         debug {
+            isMinifyEnabled = false
+            isShrinkResources = false
             if (releaseSigningConfig != null) {
                 signingConfig = releaseSigningConfig
             }

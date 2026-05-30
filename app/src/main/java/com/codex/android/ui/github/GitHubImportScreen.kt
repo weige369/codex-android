@@ -34,7 +34,8 @@ import kotlinx.coroutines.launch
 @Composable
 fun GitHubImportScreen(
     workspaceDir: String,
-    onBack: () -> Unit = {}
+    onBack: () -> Unit = {},
+    onManageRepo: ((fullName: String, localPath: String) -> Unit)? = null
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -302,11 +303,26 @@ private fun UrlImportTab(
                         else Color(0xFFB71C1C).copy(alpha = 0.2f)
                     )
                 ) {
-                    Text(
-                        result,
-                        modifier = Modifier.padding(16.dp),
-                        fontSize = 14.sp
-                    )
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text(result, fontSize = 14.sp)
+                        if (result.contains("✅") && onManageRepo != null) {
+                            Spacer(Modifier.height(8.dp))
+                            OutlinedButton(
+                                onClick = {
+                                    // Parse repo name from import result path
+                                    val path = workspaceDir
+                                    val repoPath = result.substringAfter("✅ 导入成功: ")
+                                    val repoName = repoPath.substringAfterLast("/")
+                                    onManageRepo(repoName, path)
+                                },
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Icon(Icons.Default.Settings, null, modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.width(4.dp))
+                                Text("管理仓库", fontSize = 13.sp)
+                            }
+                        }
+                    }
                 }
             }
         }

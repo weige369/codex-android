@@ -48,8 +48,14 @@ import com.codex.android.ui.theme.BottomNavInactive
 import com.codex.android.ui.theme.CodexPrimary
 import com.codex.android.ui.workspace.WorkspaceScreen
 import com.codex.android.ui.workspace.forwardStatusToWebView
+import com.codex.android.ui.setup.SetupWizardScreen
+import com.codex.android.data.preferences.SetupPreferences
+import com.codex.android.ui.github.GitHubRepoScreen
+import com.codex.android.ui.github.GitHubPRScreen
+import com.codex.android.ui.github.GitHubIssueScreen
 import com.codex.android.util.AndroidShellExecutor
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 class CodexActivity : ComponentActivity() {
@@ -70,6 +76,11 @@ class CodexActivity : ComponentActivity() {
 
     // WebView reference
     private var _webView: WebView? = null
+    
+    // GitHub repo state (for navigation to repo detail)
+    private var _currentGitHubRepo = mutableStateOf<Pair<String, String>?>(null)
+    private var _currentGitHubRepoForPRs = mutableStateOf<Pair<String, String>?>(null)
+    private var _currentGitHubRepoForIssues = mutableStateOf<Pair<String, String>?>(null)
 
     // Selected bottom nav item
     private val _selectedNavItem = mutableIntStateOf(0)
@@ -84,6 +95,10 @@ class CodexActivity : ComponentActivity() {
         data object DevEnvironment : Screen()
         data object Diagnostic : Screen()
         data object About : Screen()
+        data object SetupWizard : Screen()
+        data class GitHubRepo(val repoFullName: String, val localPath: String) : Screen()
+        data object GitHubPRList : Screen()
+        data object GitHubIssueList : Screen()
     }
 
     data class BottomNavItem(
@@ -166,6 +181,35 @@ class CodexActivity : ComponentActivity() {
 
         setContent {
             CodexTheme {
+                val setupPrefs = remember { SetupPreferences.getInstance(this@CodexActivity) }
+                var isSetupComplete by remember { mutableStateOf<Boolean?>(null) }
+
+                LaunchedEffect(Unit) {
+                    isSetupComplete = setupPrefs.isSetupCompleted()
+                }
+
+                isSetupComplete?.let { completed ->
+                    if (!completed) {
+                        SetupWizardScreen(
+                            onComplete = {
+                                lifecycleScope.launch {
+                                    setupPrefs.markSetupCompleted()
+                                    isSetupComplete = true
+                                }
+                            },
+                            onSkip = {
+                                lifecycleScope.launch {
+                                    setupPrefs.markSetupCompleted()
+                                    isSetupComplete = true
+                                }
+                            }
+                        )
+                        return@CodexTheme
+                    }
+                }
+
+                if (isSetupComplete == null) return@CodexTheme
+
                 val screen by _currentScreen
                 val runtimeState by _runtimeStateFlow
                 val wsPort by _wsPortFlow
@@ -313,7 +357,11 @@ class CodexActivity : ComponentActivity() {
                                 )
                                 Screen.GitHubImport -> GitHubImportScreen(
                                     workspaceDir = codexManager.workspaceDir.absolutePath,
-                                    onBack = { navigateTo(Screen.Workspace) }
+                                    onBack = { navigateTo(Screen.Workspace) },
+                                    onManageRepo = { fullName, localPath ->
+                                        _currentGitHubRepo.value = Pair(fullName, localPath)
+                                        navigateTo(Screen.GitHubRepo(fullName, localPath))
+                                    }
                                 )
                                 Screen.Diagnostic -> DiagnosticsScreen(
                                     onBack = { navigateTo(Screen.Settings) }
@@ -321,6 +369,72 @@ class CodexActivity : ComponentActivity() {
                                 Screen.About -> AboutScreen(
                                     onBack = { navigateTo(Screen.Settings) }
                                 )
+                                Screen.SetupWizard -> SetupWizardScreen(
+                                    onComplete = {
+                                        lifecycleScope.launch {
+                                            SetupPreferences.getInstance(this@CodexActivity).markSetupCompleted()
+                                            navigateTo(Screen.Workspace)
+                                        }
+                                    },
+                                    onSkip = {
+                                        lifecycleScope.launch {
+                                            SetupPreferences.getInstance(this@CodexActivity).markSetupCompleted()
+                                            navigateTo(Screen.Workspace)
+                                        }
+                                    }
+                                )
+                                is Screen.GitHubRepo -> {
+                                    val screen = currentScreen as Screen.GitHubRepo
+                                    GitHubRepoScreen(
+                                        repoFullName = screen.repoFullName,
+                                        repoLocalPath = screen.localPath,
+                                        onBack = { navigateTo(Screen.GitHubImport) },
+                                        onOpenPRs = {
+                                            _currentGitHubRepoForPRs.value = Pair(screen.repoFullName, screen.localPath)
+                                            navigateTo(Screen.GitHubPRList)
+                                        },
+                                        onOpenIssues = {
+                                            _currentGitHubRepoForIssues.value = Pair(screen.repoFullName, screen.localPath)
+                                            navigateTo(Screen.GitHubIssueList)
+                                        }
+                                    )
+                                }
+                                Screen.GitHubPRList -> {
+                                    val repoInfo = _currentGitHubRepoForPRs.value
+                                    if (repoInfo != null) {
+                                        GitHubPRScreen(
+                                            repoFullName = repoInfo.first,
+                                            onBack = {
+                                                _currentGitHubRepo?.let { (name, path) ->
+                                                    navigateTo(Screen.GitHubRepo(name, path))
+                                                } ?: navigateTo(Screen.GitHubImport)
+                                            }
+                                        )
+                                    } else {
+                                        GitHubPRScreen(
+                                            repoFullName = "",
+                                            onBack = { navigateTo(Screen.GitHubImport) }
+                                        )
+                                    }
+                                }
+                                Screen.GitHubIssueList -> {
+                                    val repoInfo = _currentGitHubRepoForIssues.value
+                                    if (repoInfo != null) {
+                                        GitHubIssueScreen(
+                                            repoFullName = repoInfo.first,
+                                            onBack = {
+                                                _currentGitHubRepo?.let { (name, path) ->
+                                                    navigateTo(Screen.GitHubRepo(name, path))
+                                                } ?: navigateTo(Screen.GitHubImport)
+                                            }
+                                        )
+                                    } else {
+                                        GitHubIssueScreen(
+                                            repoFullName = "",
+                                            onBack = { navigateTo(Screen.GitHubImport) }
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
@@ -363,6 +477,17 @@ class CodexActivity : ComponentActivity() {
                                     }
                                 )
                                 MoreMenuItem(
+                                    icon = Icons.Default.Folder,
+                                    title = "仓库管理",
+                                    desc = "Git 操作、PR、Issue",
+                                    onClick = {
+                                        showMoreMenu = false
+                                        _currentGitHubRepo?.let { (name, path) ->
+                                            navigateTo(Screen.GitHubRepo(name, path))
+                                        } ?: navigateTo(Screen.GitHubImport)
+                                    }
+                                )
+                                MoreMenuItem(
                                     icon = Icons.Default.BugReport,
                                     title = "诊断检查",
                                     desc = "运行设备诊断",
@@ -378,6 +503,15 @@ class CodexActivity : ComponentActivity() {
                                     onClick = {
                                         showMoreMenu = false
                                         navigateTo(Screen.About)
+                                    }
+                                )
+                                MoreMenuItem(
+                                    icon = Icons.Default.Build,
+                                    title = "设置向导",
+                                    desc = "重新运行初始化设置",
+                                    onClick = {
+                                        showMoreMenu = false
+                                        navigateTo(Screen.SetupWizard)
                                     }
                                 )
                             }

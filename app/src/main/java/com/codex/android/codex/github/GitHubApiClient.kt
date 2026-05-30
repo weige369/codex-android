@@ -243,6 +243,455 @@ class GitHubApiClient(private val context: Context) {
         val sha: String
     )
 
+
+    // ========== Pull Request API ==========
+
+    data class PullRequest(
+        val number: Int,
+        val title: String,
+        val body: String,
+        val state: String,
+        val htmlUrl: String,
+        val createdAt: String,
+        val updatedAt: String,
+        val userLogin: String,
+        val userAvatar: String,
+        val headBranch: String,
+        val baseBranch: String,
+        val isDraft: Boolean,
+        val mergeable: Boolean?,
+        val labels: List<String>
+    )
+
+    data class PRComment(
+        val id: Long,
+        val body: String,
+        val userLogin: String,
+        val userAvatar: String,
+        val createdAt: String,
+        val path: String?,
+        val line: Int?
+    )
+
+    /**
+     * 获取仓库的 Pull Request 列表
+     */
+    suspend fun listPullRequests(owner: String, repo: String, state: String = "open"): Result<List<PullRequest>> =
+        withContext(Dispatchers.IO) {
+            apiGetArray("/repos/$owner/$repo/pulls?state=$state&per_page=30") { arr ->
+                (0 until arr.length()).map { i ->
+                    val item = arr.getJSONObject(i)
+                    val labels = (0 until item.optJSONArray("labels")?.length() ?: 0).map { li ->
+                        item.getJSONArray("labels").getJSONObject(li).getString("name")
+                    }
+                    PullRequest(
+                        number = item.getInt("number"),
+                        title = item.getString("title"),
+                        body = item.optString("body", ""),
+                        state = item.getString("state"),
+                        htmlUrl = item.getString("html_url"),
+                        createdAt = item.getString("created_at"),
+                        updatedAt = item.getString("updated_at"),
+                        userLogin = item.getJSONObject("user").getString("login"),
+                        userAvatar = item.getJSONObject("user").getString("avatar_url"),
+                        headBranch = item.getJSONObject("head").getString("ref"),
+                        baseBranch = item.getJSONObject("base").getString("ref"),
+                        isDraft = item.optBoolean("draft", false),
+                        mergeable = if (item.has("mergeable") && !item.isNull("mergeable")) item.getBoolean("mergeable") else null,
+                        labels = labels
+                    )
+                }
+            }
+        }
+
+    /**
+     * 获取单个 Pull Request 详情
+     */
+    suspend fun getPullRequest(owner: String, repo: String, number: Int): Result<PullRequest> =
+        withContext(Dispatchers.IO) {
+            apiGetObject("/repos/$owner/$repo/pulls/$number") { item ->
+                val labels = (0 until item.optJSONArray("labels")?.length() ?: 0).map { li ->
+                    item.getJSONArray("labels").getJSONObject(li).getString("name")
+                }
+                PullRequest(
+                    number = item.getInt("number"),
+                    title = item.getString("title"),
+                    body = item.optString("body", ""),
+                    state = item.getString("state"),
+                    htmlUrl = item.getString("html_url"),
+                    createdAt = item.getString("created_at"),
+                    updatedAt = item.getString("updated_at"),
+                    userLogin = item.getJSONObject("user").getString("login"),
+                    userAvatar = item.getJSONObject("user").getString("avatar_url"),
+                    headBranch = item.getJSONObject("head").getString("ref"),
+                    baseBranch = item.getJSONObject("base").getString("ref"),
+                    isDraft = item.optBoolean("draft", false),
+                    mergeable = if (item.has("mergeable") && !item.isNull("mergeable")) item.getBoolean("mergeable") else null,
+                    labels = labels
+                )
+            }
+        }
+
+    /**
+     * 创建 Pull Request
+     */
+    suspend fun createPullRequest(owner: String, repo: String, title: String, body: String, head: String, base: String): Result<PullRequest> =
+        withContext(Dispatchers.IO) {
+            apiPost("/repos/$owner/$repo/pulls",
+                JSONObject().apply {
+                    put("title", title)
+                    put("body", body)
+                    put("head", head)
+                    put("base", base)
+                }
+            ) { item ->
+                val labels = (0 until item.optJSONArray("labels")?.length() ?: 0).map { li ->
+                    item.getJSONArray("labels").getJSONObject(li).getString("name")
+                }
+                PullRequest(
+                    number = item.getInt("number"),
+                    title = item.getString("title"),
+                    body = item.optString("body", ""),
+                    state = item.getString("state"),
+                    htmlUrl = item.getString("html_url"),
+                    createdAt = item.getString("created_at"),
+                    updatedAt = item.getString("updated_at"),
+                    userLogin = item.getJSONObject("user").getString("login"),
+                    userAvatar = item.getJSONObject("user").getString("avatar_url"),
+                    headBranch = item.getJSONObject("head").getString("ref"),
+                    baseBranch = item.getJSONObject("base").getString("ref"),
+                    isDraft = item.optBoolean("draft", false),
+                    mergeable = null,
+                    labels = labels
+                )
+            }
+        }
+
+    /**
+     * 获取 PR 评论列表
+     */
+    suspend fun listPRComments(owner: String, repo: String, number: Int): Result<List<PRComment>> =
+        withContext(Dispatchers.IO) {
+            apiGetArray("/repos/$owner/$repo/pulls/$number/comments") { arr ->
+                (0 until arr.length()).map { i ->
+                    val item = arr.getJSONObject(i)
+                    PRComment(
+                        id = item.getLong("id"),
+                        body = item.getString("body"),
+                        userLogin = item.getJSONObject("user").getString("login"),
+                        userAvatar = item.getJSONObject("user").getString("avatar_url"),
+                        createdAt = item.getString("created_at"),
+                        path = item.optString("path"),
+                        line = if (item.has("line") && !item.isNull("line")) item.getInt("line") else null
+                    )
+                }
+            }
+        }
+
+    /**
+     * 创建 PR 评论
+     */
+    suspend fun createPRComment(owner: String, repo: String, number: Int, body: String): Result<PRComment> =
+        withContext(Dispatchers.IO) {
+            apiPost("/repos/$owner/$repo/pulls/$number/comments",
+                JSONObject().apply { put("body", body) }
+            ) { item ->
+                PRComment(
+                    id = item.getLong("id"),
+                    body = item.getString("body"),
+                    userLogin = item.getJSONObject("user").getString("login"),
+                    userAvatar = item.getJSONObject("user").getString("avatar_url"),
+                    createdAt = item.getString("created_at"),
+                    path = item.optString("path"),
+                    line = if (item.has("line") && !item.isNull("line")) item.getInt("line") else null
+                )
+            }
+        }
+
+    // ========== Issue API ==========
+
+    data class Issue(
+        val number: Int,
+        val title: String,
+        val body: String,
+        val state: String,
+        val htmlUrl: String,
+        val createdAt: String,
+        val updatedAt: String,
+        val userLogin: String,
+        val userAvatar: String,
+        val comments: Int,
+        val labels: List<String>,
+        val assignees: List<String>
+    )
+
+    data class IssueComment(
+        val id: Long,
+        val body: String,
+        val userLogin: String,
+        val userAvatar: String,
+        val createdAt: String
+    )
+
+    /**
+     * 获取仓库 Issue 列表
+     */
+    suspend fun listIssues(owner: String, repo: String, state: String = "open"): Result<List<Issue>> =
+        withContext(Dispatchers.IO) {
+            apiGetArray("/repos/$owner/$repo/issues?state=$state&per_page=30") { arr ->
+                (0 until arr.length()).mapNotNull { i ->
+                    val item = arr.getJSONObject(i)
+                    // Filter out PRs (GitHub returns PRs in issue list too)
+                    if (item.has("pull_request")) return@mapNotNull null
+                    val labels = (0 until item.optJSONArray("labels")?.length() ?: 0).map { li ->
+                        item.getJSONArray("labels").getJSONObject(li).getString("name")
+                    }
+                    val assignees = (0 until item.optJSONArray("assignees")?.length() ?: 0).map { ai ->
+                        item.getJSONArray("assignees").getJSONObject(ai).getString("login")
+                    }
+                    Issue(
+                        number = item.getInt("number"),
+                        title = item.getString("title"),
+                        body = item.optString("body", ""),
+                        state = item.getString("state"),
+                        htmlUrl = item.getString("html_url"),
+                        createdAt = item.getString("created_at"),
+                        updatedAt = item.getString("updated_at"),
+                        userLogin = item.getJSONObject("user").getString("login"),
+                        userAvatar = item.getJSONObject("user").getString("avatar_url"),
+                        comments = item.getInt("comments"),
+                        labels = labels,
+                        assignees = assignees
+                    )
+                }
+            }
+        }
+
+    /**
+     * 获取单个 Issue 详情
+     */
+    suspend fun getIssue(owner: String, repo: String, number: Int): Result<Issue> =
+        withContext(Dispatchers.IO) {
+            apiGetObject("/repos/$owner/$repo/issues/$number") { item ->
+                val labels = (0 until item.optJSONArray("labels")?.length() ?: 0).map { li ->
+                    item.getJSONArray("labels").getJSONObject(li).getString("name")
+                }
+                val assignees = (0 until item.optJSONArray("assignees")?.length() ?: 0).map { ai ->
+                    item.getJSONArray("assignees").getJSONObject(ai).getString("login")
+                }
+                Issue(
+                    number = item.getInt("number"),
+                    title = item.getString("title"),
+                    body = item.optString("body", ""),
+                    state = item.getString("state"),
+                    htmlUrl = item.getString("html_url"),
+                    createdAt = item.getString("created_at"),
+                    updatedAt = item.getString("updated_at"),
+                    userLogin = item.getJSONObject("user").getString("login"),
+                    userAvatar = item.getJSONObject("user").getString("avatar_url"),
+                    comments = item.getInt("comments"),
+                    labels = labels,
+                    assignees = assignees
+                )
+            }
+        }
+
+    /**
+     * 创建 Issue
+     */
+    suspend fun createIssue(owner: String, repo: String, title: String, body: String, labels: List<String> = emptyList()): Result<Issue> =
+        withContext(Dispatchers.IO) {
+            apiPost("/repos/$owner/$repo/issues",
+                JSONObject().apply {
+                    put("title", title)
+                    put("body", body)
+                    if (labels.isNotEmpty()) put("labels", JSONArray(labels))
+                }
+            ) { item ->
+                val labelList = (0 until item.optJSONArray("labels")?.length() ?: 0).map { li ->
+                    item.getJSONArray("labels").getJSONObject(li).getString("name")
+                }
+                Issue(
+                    number = item.getInt("number"),
+                    title = item.getString("title"),
+                    body = item.optString("body", ""),
+                    state = item.getString("state"),
+                    htmlUrl = item.getString("html_url"),
+                    createdAt = item.getString("created_at"),
+                    updatedAt = item.getString("updated_at"),
+                    userLogin = item.getJSONObject("user").getString("login"),
+                    userAvatar = item.getJSONObject("user").getString("avatar_url"),
+                    comments = item.getInt("comments"),
+                    labels = labelList,
+                    assignees = emptyList()
+                )
+            }
+        }
+
+    /**
+     * 获取 Issue 评论列表
+     */
+    suspend fun listIssueComments(owner: String, repo: String, number: Int): Result<List<IssueComment>> =
+        withContext(Dispatchers.IO) {
+            apiGetArray("/repos/$owner/$repo/issues/$number/comments") { arr ->
+                (0 until arr.length()).map { i ->
+                    val item = arr.getJSONObject(i)
+                    IssueComment(
+                        id = item.getLong("id"),
+                        body = item.getString("body"),
+                        userLogin = item.getJSONObject("user").getString("login"),
+                        userAvatar = item.getJSONObject("user").getString("avatar_url"),
+                        createdAt = item.getString("created_at")
+                    )
+                }
+            }
+        }
+
+    /**
+     * 创建 Issue 评论
+     */
+    suspend fun createIssueComment(owner: String, repo: String, number: Int, body: String): Result<IssueComment> =
+        withContext(Dispatchers.IO) {
+            apiPost("/repos/$owner/$repo/issues/$number/comments",
+                JSONObject().apply { put("body", body) }
+            ) { item ->
+                IssueComment(
+                    id = item.getLong("id"),
+                    body = item.getString("body"),
+                    userLogin = item.getJSONObject("user").getString("login"),
+                    userAvatar = item.getJSONObject("user").getString("avatar_url"),
+                    createdAt = item.getString("created_at")
+                )
+            }
+        }
+
+    /**
+     * 关闭 Issue
+     */
+    suspend fun closeIssue(owner: String, repo: String, number: Int): Result<Issue> =
+        withContext(Dispatchers.IO) {
+            apiPatch("/repos/$owner/$repo/issues/$number",
+                JSONObject().apply { put("state", "closed") }
+            ) { item ->
+                val labels = (0 until item.optJSONArray("labels")?.length() ?: 0).map { li ->
+                    item.getJSONArray("labels").getJSONObject(li).getString("name")
+                }
+                Issue(
+                    number = item.getInt("number"),
+                    title = item.getString("title"),
+                    body = item.optString("body", ""),
+                    state = item.getString("state"),
+                    htmlUrl = item.getString("html_url"),
+                    createdAt = item.getString("created_at"),
+                    updatedAt = item.getString("updated_at"),
+                    userLogin = item.getJSONObject("user").getString("login"),
+                    userAvatar = item.getJSONObject("user").getString("avatar_url"),
+                    comments = item.getInt("comments"),
+                    labels = labels,
+                    assignees = emptyList()
+                )
+            }
+        }
+
+    // ========== Repo / Git 信息 API ==========
+
+    data class BranchInfo(
+        val name: String,
+        val sha: String,
+        val isDefault: Boolean
+    )
+
+    data class CommitInfo(
+        val sha: String,
+        val message: String,
+        val authorName: String,
+        val authorEmail: String,
+        val authorDate: String,
+        val htmlUrl: String
+    )
+
+    /**
+     * 获取仓库分支列表
+     */
+    suspend fun listBranches(owner: String, repo: String): Result<List<BranchInfo>> =
+        withContext(Dispatchers.IO) {
+            apiGetArray("/repos/$owner/$repo/branches?per_page=100") { arr ->
+                (0 until arr.length()).map { i ->
+                    val item = arr.getJSONObject(i)
+                    BranchInfo(
+                        name = item.getString("name"),
+                        sha = item.getJSONObject("commit").getString("sha"),
+                        isDefault = false
+                    )
+                }
+            }
+        }
+
+    /**
+     * 获取仓库最近提交
+     */
+    suspend fun listCommits(owner: String, repo: String, branch: String = "main"): Result<List<CommitInfo>> =
+        withContext(Dispatchers.IO) {
+            apiGetArray("/repos/$owner/$repo/commits?sha=$branch&per_page=20") { arr ->
+                (0 until arr.length()).map { i ->
+                    val item = arr.getJSONObject(i)
+                    val commit = item.getJSONObject("commit")
+                    val author = commit.getJSONObject("author")
+                    CommitInfo(
+                        sha = item.getString("sha"),
+                        message = commit.getString("message"),
+                        authorName = author.getString("name"),
+                        authorEmail = author.getString("email"),
+                        authorDate = author.getString("date"),
+                        htmlUrl = commit.optString("html_url", "")
+                    )
+                }
+            }
+        }
+
+    /** 新增 API 方法：POST */
+    private suspend fun <T> apiPost(endpoint: String, body: JSONObject, parser: (JSONObject) -> T): Result<T> {
+        return apiWithBody("POST", endpoint, body, parser)
+    }
+
+    /** 新增 API 方法：PATCH */
+    private suspend fun <T> apiPatch(endpoint: String, body: JSONObject, parser: (JSONObject) -> T): Result<T> {
+        return apiWithBody("PATCH", endpoint, body, parser)
+    }
+
+    private suspend fun <T> apiWithBody(method: String, endpoint: String, body: JSONObject, parser: (JSONObject) -> T): Result<T> {
+        return try {
+            val tokenResult = getToken()
+            if (tokenResult.isFailure) return Result.failure(tokenResult.exceptionOrNull()!!)
+
+            val url = URL("$API_BASE$endpoint")
+            val conn = url.openConnection() as HttpURLConnection
+            conn.requestMethod = method
+            conn.setRequestProperty("Authorization", "Bearer ${tokenResult.getOrThrow()}")
+            conn.setRequestProperty("Accept", "application/vnd.github.v3+json")
+            conn.setRequestProperty("Content-Type", "application/json")
+            conn.doOutput = true
+            conn.connectTimeout = 15000
+            conn.readTimeout = 30000
+
+            OutputStreamWriter(conn.outputStream).use { writer ->
+                writer.write(body.toString())
+                writer.flush()
+            }
+
+            val code = conn.responseCode
+            if (code in 200..299) {
+                val responseBody = readStream(conn.inputStream)
+                val json = JSONObject(responseBody)
+                Result.success(parser(json))
+            } else {
+                val error = readStream(conn.errorStream)
+                Result.failure(Exception("GitHub API 错误 ($code): $error"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
     // ========== 内部方法 ==========
 
     private suspend fun <T> apiGetObject(endpoint: String, parser: (JSONObject) -> T): Result<T> {

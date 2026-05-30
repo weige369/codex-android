@@ -10,6 +10,7 @@
     "measure": "node ./scripts/measure-first-screen.mjs",
     "measure:baseline": "node ./scripts/measure-first-screen.mjs --update-baseline",
     "measure:check": "node ./scripts/measure-first-screen.mjs --check",
+    "measure:summary": "node ./scripts/measure-first-screen.mjs --summary",
     "measure:browser": "node ./scripts/measure-first-screen-browser.mjs",
     "measure:browser:baseline": "node ./scripts/measure-first-screen-browser.mjs --update-baseline",
     "sync:android-assets": "node ./scripts/sync-to-android-assets.mjs"

@@ -41,6 +41,9 @@ jobs:
       - name: Build web-chat
         if: steps.changes.outputs.changed == 'true'
         run: npm --prefix web-chat run build
+      - name: First-screen size summary
+        if: steps.changes.outputs.changed == 'true'
+        run: npm --prefix web-chat run measure:summary >> "$GITHUB_STEP_SUMMARY"
       - name: Check first-screen size budget
         if: steps.changes.outputs.changed == 'true'
         run: npm --prefix web-chat run measure:check

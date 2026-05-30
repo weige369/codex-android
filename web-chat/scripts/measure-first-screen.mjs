@@ -14,6 +14,7 @@
 //   node scripts/measure-first-screen.mjs --update-baseline  # (re)write the saved baseline
 //   node scripts/measure-first-screen.mjs --check         # exit 1 if first-screen JS regressed
 //   node scripts/measure-first-screen.mjs --json          # print machine-readable JSON only
+//   node scripts/measure-first-screen.mjs --summary       # print a Markdown summary (for $GITHUB_STEP_SUMMARY)
 
 import { gzipSync, brotliCompressSync } from 'node:zlib';
 import {
@@ -37,6 +38,7 @@ const args = new Set(process.argv.slice(2));
 const updateBaseline = args.has('--update-baseline');
 const checkMode = args.has('--check');
 const jsonOnly = args.has('--json');
+const summaryMode = args.has('--summary');
 
 // Simulated network profiles. Throughput is the realised download speed; latency
 // is per-request round-trip overhead. These mirror Chrome DevTools / Lighthouse
@@ -177,6 +179,80 @@ const result = {
 
 if (jsonOnly) {
   console.log(JSON.stringify(result, null, 2));
+  process.exit(0);
+}
+
+// Markdown summary for GitHub Actions job summary / PR surfacing. Prints the
+// first-screen gzip JS delta vs baseline plus the per-chunk breakdown. Never
+// fails (the separate --check run owns the pass/fail gate), so this can run on
+// both passing and failing budget checks.
+if (summaryMode) {
+  const sBaseline = loadBaseline();
+  const lines = [];
+  lines.push('### web-chat 首屏体积 (first-screen budget)');
+  lines.push('');
+  lines.push(`Build entry chunk: \`${result.buildId}\``);
+  lines.push('');
+  if (!sBaseline) {
+    lines.push(
+      '> 尚未记录基线 (no baseline saved). 运行 `npm run measure:baseline` 生成基线后即可显示对比。'
+    );
+  } else {
+    const sBase = sBaseline.firstScreen?.jsTotal?.gzip ?? 0;
+    const sCur = firstScreenJsTotal.gzip;
+    const sDelta = sCur - sBase;
+    const sPct = sBase ? (sDelta / sBase) * 100 : 0;
+    const sSign = sDelta >= 0 ? '+' : '';
+    const tol = REGRESSION_TOLERANCE * 100;
+    const status =
+      sPct > tol
+        ? '❌ 超出预算 (over budget)'
+        : sDelta > 0
+          ? '⚠️ 体积增加（仍在预算内）'
+          : '✅ 体积未增加';
+    lines.push(
+      `**首屏 JS (gzip): ${fmtKB(sBase)} → ${fmtKB(sCur)} ` +
+        `(${sSign}${fmtKB(sDelta)}, ${sSign}${sPct.toFixed(1)}%)**  ${status}`
+    );
+    lines.push('');
+    lines.push(
+      `基线 build: \`${sBaseline.buildId}\` · 预算容忍度：首屏 gzip JS 增长 > ${tol.toFixed(
+        0
+      )}% 即判定回归。`
+    );
+    lines.push('');
+    lines.push('| chunk | raw | gzip | brotli |');
+    lines.push('| --- | ---: | ---: | ---: |');
+    for (const item of firstScreenJs) {
+      lines.push(
+        `| ${item.name} | ${fmtKB(item.sizes.raw)} | ${fmtKB(item.sizes.gzip)} | ${fmtKB(
+          item.sizes.brotli
+        )} |`
+      );
+    }
+    if (cssFile) {
+      lines.push(
+        `| ${cssFile.name} | ${fmtKB(cssFile.sizes.raw)} | ${fmtKB(
+          cssFile.sizes.gzip
+        )} | ${fmtKB(cssFile.sizes.brotli)} |`
+      );
+    }
+    lines.push(
+      `| **critical total** | **${fmtKB(firstScreenCritical.raw)}** | **${fmtKB(
+        firstScreenCritical.gzip
+      )}** | **${fmtKB(firstScreenCritical.brotli)}** |`
+    );
+    lines.push('');
+    lines.push('估算首屏传输时间（仅网络传输，不含解析/执行）：');
+    lines.push('');
+    lines.push('| profile | gzip | brotli |');
+    lines.push('| --- | ---: | ---: |');
+    for (const row of network) {
+      lines.push(`| ${row.profile} | ${row.estGzipMs} ms | ${row.estBrotliMs} ms |`);
+    }
+  }
+  lines.push('');
+  console.log(lines.join('\n'));
   process.exit(0);
 }
 

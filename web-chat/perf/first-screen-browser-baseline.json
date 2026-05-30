@@ -1,7 +1,7 @@
 {
-  "measuredAt": "2026-05-30T11:09:44.110Z",
+  "measuredAt": "2026-05-30T11:36:54.000Z",
   "chromium": "/nix/store/qa9cnw4v5xkxyip6mb9kxqfq1z4x2dx1-chromium-138.0.7204.100/bin/chromium",
-  "iterations": 2,
+  "iterations": 3,
   "viewport": {
     "width": 390,
     "height": 844,
@@ -9,7 +9,7 @@
     "isMobile": true,
     "hasTouch": true
   },
-  "byteBaselineBuildId": "index-a-Wv-Oiu.js",
+  "byteBaselineBuildId": "index-CE_bup-9.js",
   "profiles": [
     {
       "profile": "LAN Wi-Fi + mid-tier phone",
@@ -17,15 +17,15 @@
       "cpuRate": 4,
       "kbps": 50000,
       "rttMs": 10,
-      "samples": 2,
+      "samples": 3,
       "metrics": {
-        "firstPaintMs": 142,
-        "firstContentfulPaintMs": 448,
-        "domContentLoadedMs": 195,
-        "loadMs": 195,
-        "domInteractiveMs": 48,
-        "overlayReadyMs": 500,
-        "timeToInteractiveMs": 448
+        "firstPaintMs": 124,
+        "firstContentfulPaintMs": 456,
+        "domContentLoadedMs": 176,
+        "loadMs": 176,
+        "domInteractiveMs": 47,
+        "overlayReadyMs": 508,
+        "timeToInteractiveMs": 456
       },
       "estNetworkOnlyMs": {
         "gzip": 20,
@@ -38,15 +38,15 @@
       "cpuRate": 4,
       "kbps": 1600,
       "rttMs": 150,
-      "samples": 2,
+      "samples": 3,
       "metrics": {
-        "firstPaintMs": 2484,
-        "firstContentfulPaintMs": 3446,
-        "domContentLoadedMs": 3176,
-        "loadMs": 3176,
-        "domInteractiveMs": 192,
-        "overlayReadyMs": 3483,
-        "timeToInteractiveMs": 3446
+        "firstPaintMs": 2208,
+        "firstContentfulPaintMs": 3168,
+        "domContentLoadedMs": 2889,
+        "loadMs": 2890,
+        "domInteractiveMs": 189,
+        "overlayReadyMs": 3206,
+        "timeToInteractiveMs": 3168
       },
       "estNetworkOnlyMs": {
         "gzip": 450,
@@ -59,15 +59,15 @@
       "cpuRate": 6,
       "kbps": 400,
       "rttMs": 400,
-      "samples": 2,
+      "samples": 3,
       "metrics": {
-        "firstPaintMs": 9406,
-        "firstContentfulPaintMs": 12470,
-        "domContentLoadedMs": 12092,
-        "loadMs": 12094,
-        "domInteractiveMs": 462,
-        "overlayReadyMs": 12542,
-        "timeToInteractiveMs": 12470
+        "firstPaintMs": 8296,
+        "firstContentfulPaintMs": 11356,
+        "domContentLoadedMs": 10949,
+        "loadMs": 10950,
+        "domInteractiveMs": 463,
+        "overlayReadyMs": 11426,
+        "timeToInteractiveMs": 11356
       },
       "estNetworkOnlyMs": {
         "gzip": 1600,

@@ -166,15 +166,47 @@ class CodexMCPBridge(private val context: Context) {
         try {
             if (configFile.exists()) {
                 val json = JSONObject(configFile.readText())
-                // Parse servers
+                val arr = json.optJSONArray("servers")
+                if (arr != null) {
+                    val list = mutableListOf<MCPServer>()
+                    for (i in 0 until arr.length()) {
+                        val obj = arr.getJSONObject(i)
+                        list.add(MCPServer(
+                            id = obj.getString("id"),
+                            name = obj.getString("name"),
+                            url = obj.optString("url", ""),
+                            state = try { ServerState.valueOf(obj.optString("state", "STOPPED")) } catch (_: Exception) { ServerState.STOPPED },
+                            authType = obj.optString("authType", "none"),
+                            isBuiltin = obj.optBoolean("isBuiltin", false)
+                        ))
+                    }
+                    _servers.value = list
+                }
             }
-        } catch (_: Exception) {}
+        } catch (e: Exception) {
+            Log.e(TAG, "加载服务器配置失败", e)
+        }
     }
 
     private fun saveServers() {
         try {
-            configFile.writeText(JSONObject().toString())
-        } catch (_: Exception) {}
+            val arr = org.json.JSONArray()
+            for (s in _servers.value) {
+                arr.put(JSONObject().apply {
+                    put("id", s.id)
+                    put("name", s.name)
+                    put("url", s.url)
+                    put("state", s.state.name)
+                    put("authType", s.authType)
+                    put("isBuiltin", s.isBuiltin)
+                })
+            }
+            configFile.writeText(JSONObject().apply {
+                put("servers", arr)
+            }.toString(2))
+        } catch (e: Exception) {
+            Log.e(TAG, "保存服务器配置失败", e)
+        }
     }
 
     private fun addLog(message: String) {

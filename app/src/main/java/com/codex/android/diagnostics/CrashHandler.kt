@@ -28,21 +28,78 @@ class CrashHandler(private val context: Context) {
     private var onCrashCaptured: ((File) -> Unit)? = null
 
     /**
+     * 自动上传最近未上报的崩溃报告
+     */
+    private fun autoUploadCrash() {
+        try {
+            val prefs = DiagnosticPrefs(context)
+            if (!prefs.uploadOnCrash || !prefs.isConfigured) return
+
+            val crashDir = File(context.filesDir, CRASH_DIR)
+            val uploadedFlag = File(context.filesDir, "crashes_uploaded.flag")
+            if (!crashDir.exists()) return
+
+            val crashes = crashDir.listFiles()?.filter { it.extension == "txt" } ?: return
+            if (crashes.isEmpty()) return
+            
+            // 标记已上传，避免重复上传
+            if (!uploadedFlag.exists()) {
+                uploadedFlag.createNewFile()
+                
+                // 后台异步上传
+                Thread {
+                    try {
+                        val report = buildCrashReportText(crashes.first())
+                        val uploader = ReportUploader(context)
+                        // 使用 Gist 上传
+                        kotlinx.coroutines.runBlocking {
+                            uploader.uploadToGist(
+                                createDummyReport(context, report),
+                                prefs.githubToken
+                            )
+                        }
+                    } catch (_: Exception) {}
+                }.start()
+            }
+        } catch (_: Exception) {}
+    }
+
+    private fun createDummyReport(context: Context, crashText: String): com.codex.android.diagnostics.DiagnosticsRunner.DiagnosticsReport {
+        return com.codex.android.diagnostics.DiagnosticsRunner.DiagnosticsReport(
+            results = listOf(
+                com.codex.android.diagnostics.DiagnosticsRunner.TestResult(
+                    "崩溃报告", true, "已自动捕获崩溃日志", 
+                    com.codex.android.diagnostics.DiagnosticsRunner.Severity.ERROR
+                )
+            )
+        )
+    }
+
+    private fun buildCrashReportText(crashFile: File): String {
+        return try { crashFile.readText() } catch (_: Exception) { "无法读取崩溃日志" }
+    }
+
+    /**
      * 注册崩溃捕获
      */
     fun register(onCrash: ((crashFile: File) -> Unit)? = null) {
         onCrashCaptured = onCrash
         defaultHandler = Thread.getDefaultUncaughtExceptionHandler()
+        autoUploadCrash()
 
         Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
             try {
                 val crashFile = saveCrashReport(throwable)
-                onCrashCaptured?.invoke(crashFile)
-            } catch (_: Exception) {}
+                try { onCrashCaptured?.invoke(crashFile) } catch (_: Exception) {}
+            } catch (e: Exception) {
+                android.util.Log.e(TAG, "崩溃处理异常", e)
+            }
 
             // 传递给默认处理器
-            defaultHandler?.uncaughtException(thread, throwable)
-                ?: run { Process.killProcess(Process.myPid()) }
+            try {
+                defaultHandler?.uncaughtException(thread, throwable)
+            } catch (_: Exception) {}
+            Process.killProcess(Process.myPid())
         }
     }
 

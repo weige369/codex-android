@@ -23,6 +23,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import android.widget.Toast
 import com.codex.android.codex.CodexManager
 import com.codex.android.service.CodexRuntimeService
 
@@ -208,26 +209,36 @@ fun CodexSettingsScreen(
                                 SettingsRow("大小", binarySize)
                             }
                             Spacer(Modifier.height(8.dp))
-                            if (isInstalled) {
-                                Button(
-                                    onClick = {
-                                        CodexRuntimeService.start(context)
-                                    },
-                                    modifier = Modifier.fillMaxWidth(),
-                                    colors = ButtonDefaults.buttonColors(
-                                        containerColor = MaterialTheme.colorScheme.primary
-                                    )
-                                ) { Text("启动 Codex 运行时") }
+                            val connMode = context.getSharedPreferences("codex_prefs", Context.MODE_PRIVATE)
+                                .getString("conn_mode", "local")
+                            if (connMode == "local") {
+                                if (isInstalled) {
+                                    Button(
+                                        onClick = { CodexRuntimeService.start(context) },
+                                        modifier = Modifier.fillMaxWidth(),
+                                        colors = ButtonDefaults.buttonColors(
+                                            containerColor = MaterialTheme.colorScheme.primary
+                                        )
+                                    ) { Text("启动 Codex 运行时") }
+                                } else {
+                                    Button(
+                                        onClick = { CodexRuntimeService.start(context) },
+                                        modifier = Modifier.fillMaxWidth(),
+                                        colors = ButtonDefaults.buttonColors(
+                                            containerColor = MaterialTheme.colorScheme.primary
+                                        )
+                                    ) { Text("下载并启动 Codex CLI") }
+                                }
                             } else {
                                 Button(
                                     onClick = {
-                                        CodexRuntimeService.start(context)
+                                        Toast.makeText(context, "API 模式：请在设置中配置 API Key 和 URL", Toast.LENGTH_SHORT).show()
                                     },
                                     modifier = Modifier.fillMaxWidth(),
                                     colors = ButtonDefaults.buttonColors(
-                                        containerColor = MaterialTheme.colorScheme.primary
+                                        containerColor = MaterialTheme.colorScheme.secondary
                                     )
-                                ) { Text("下载并启动 Codex CLI") }
+                                ) { Text("🔗 API 模式已启用") }
                             }
                         }
                     }

@@ -189,16 +189,21 @@ fun forwardStatusToWebView(
     wsPort: Int,
     isRunning: Boolean
 ) {
-    webView?.post {
-        webView.evaluateJavascript(
-            "window.onCodexStatusUpdate && window.onCodexStatusUpdate('${state.name}', $wsPort, $isRunning);",
-            null
-        )
-        if (state == RuntimeState.RUNNING) {
-            webView.evaluateJavascript(
-                "window.connectWebSocket && window.connectWebSocket();",
+    val wv = webView ?: return
+    wv.post {
+        try {
+            wv.evaluateJavascript(
+                "window.onCodexStatusUpdate && window.onCodexStatusUpdate('${state.name}', $wsPort, $isRunning);",
                 null
             )
+            if (state == RuntimeState.RUNNING) {
+                wv.evaluateJavascript(
+                    "window.connectWebSocket && window.connectWebSocket();",
+                    null
+                )
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("forwardStatusToWebView", "JS 调用失败", e)
         }
     }
 }

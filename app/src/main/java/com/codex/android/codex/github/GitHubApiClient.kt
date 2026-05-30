@@ -2,7 +2,7 @@ package com.codex.android.codex.github
 
 import android.content.Context
 import android.util.Log
-import com.ai.assistance.operit.data.preferences.GitHubAuthPreferences
+import com.codex.android.data.preferences.GitHubAuthPreferences
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray

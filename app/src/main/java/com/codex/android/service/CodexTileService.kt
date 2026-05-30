@@ -24,11 +24,17 @@ class CodexTileService : TileService() {
 
     override fun onClick() {
         super.onClick()
-        // Toggle: open main activity
-        val intent = Intent(this, CodexActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK
+        // Toggle runtime based on current state
+        val currentState = CodexRuntimeService.state.value
+        when (currentState) {
+            RuntimeState.RUNNING -> {
+                CodexRuntimeService.stop(this)
+            }
+            else -> {
+                CodexRuntimeService.start(this)
+            }
         }
-        startActivityAndCollapse(intent)
+        updateTile()
     }
 
     private fun updateTile() {

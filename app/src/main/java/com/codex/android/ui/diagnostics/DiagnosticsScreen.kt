@@ -96,14 +96,15 @@ fun DiagnosticsScreen(onBack: () -> Unit = {}) {
                                 CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
                                 Spacer(Modifier.width(12.dp)); Text("正在诊断...")
                             } else if (report != null) {
-                                val icon = if (report!!.isAllPassed) Icons.Default.CheckCircle else Icons.Default.Warning
-                                val color = if (report!!.isAllPassed) Color(0xFF2ED573) else Color(0xFFFFA502)
+                                val allPassed = report?.isAllPassed ?: false
+                                val icon = if (allPassed) Icons.Default.CheckCircle else Icons.Default.Warning
+                                val color = if (allPassed) Color(0xFF2ED573) else Color(0xFFFFA502)
                                 Icon(icon, null, tint = color, modifier = Modifier.size(28.dp))
                                 Spacer(Modifier.width(12.dp))
                                 Column(modifier = Modifier.weight(1f)) {
-                                    Text(if (report!!.isAllPassed) "全部通过" else "发现问题",
+                                    Text(if (allPassed) "全部通过" else "发现问题",
                                         fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
-                                    Text("${report!!.passedCount}/${report!!.totalCount} 通过 · ${report!!.failedCount} 失败",
+                                    Text("${report?.passedCount ?: 0}/${report?.totalCount ?: 0} 通过 · ${report?.failedCount ?: 0} 失败",
                                         fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 }
                             }
@@ -144,23 +145,23 @@ fun DiagnosticsScreen(onBack: () -> Unit = {}) {
                         Column(modifier = Modifier.padding(16.dp)) {
                             Row(Modifier.fillMaxWidth().padding(vertical = 3.dp), Arrangement.SpaceBetween) {
                                 Text("Android", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                Text(report!!.deviceInfo.androidVersion, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                                Text(report?.deviceInfo?.androidVersion ?: "未知", fontSize = 13.sp, fontWeight = FontWeight.Medium)
                             }
                             Row(Modifier.fillMaxWidth().padding(vertical = 3.dp), Arrangement.SpaceBetween) {
                                 Text("设备", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                Text(report!!.deviceInfo.device, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                                Text(report?.deviceInfo?.device ?: "未知", fontSize = 13.sp, fontWeight = FontWeight.Medium)
                             }
                             Row(Modifier.fillMaxWidth().padding(vertical = 3.dp), Arrangement.SpaceBetween) {
                                 Text("架构", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                Text(report!!.deviceInfo.arch, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                                Text(report?.deviceInfo?.arch ?: "未知", fontSize = 13.sp, fontWeight = FontWeight.Medium)
                             }
                             Row(Modifier.fillMaxWidth().padding(vertical = 3.dp), Arrangement.SpaceBetween) {
                                 Text("内存", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                Text(report!!.deviceInfo.memory, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                                Text(report?.deviceInfo?.memory ?: "未知", fontSize = 13.sp, fontWeight = FontWeight.Medium)
                             }
                             Row(Modifier.fillMaxWidth().padding(vertical = 3.dp), Arrangement.SpaceBetween) {
                                 Text("存储", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                Text(report!!.deviceInfo.diskSpace, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                                Text(report?.deviceInfo?.diskSpace ?: "未知", fontSize = 13.sp, fontWeight = FontWeight.Medium)
                             }
                         }
                     }
@@ -171,7 +172,7 @@ fun DiagnosticsScreen(onBack: () -> Unit = {}) {
                     Text("测试结果", fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
                         color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(start = 4.dp, top = 8.dp))
                 }
-                val results = report!!.results
+                val results = report?.results ?: emptyList()
                 items(results) { result ->
                     val severityColor = when (result.severity) {
                         DiagnosticsRunner.Severity.ERROR -> Color(0xFFFF4757)
@@ -287,9 +288,9 @@ fun DiagnosticsScreen(onBack: () -> Unit = {}) {
                         scope.launch {
                             isUploading = true; uploadResult = null
                             val r = if (prefs.gistMode) {
-                                uploader.uploadToGist(report!!, prefs.githubToken)
+                                uploader.uploadToGist(report ?: return@launch, prefs.githubToken)
                             } else {
-                                uploader.uploadToGitHubIssues(report!!, prefs.githubToken, prefs.repoOwner, prefs.repoName)
+                                uploader.uploadToGitHubIssues(report ?: return@launch, prefs.githubToken, prefs.repoOwner, prefs.repoName)
                             }
                             uploadResult = r.message
                             isUploading = false
@@ -371,7 +372,7 @@ fun DiagnosticsScreen(onBack: () -> Unit = {}) {
                     scope.launch {
     isRunning = true
     val results = diagnostics.runCategory("network")
-    report = if (report != null) report!!.copy(results = results) else null
+    report = report?.let { r -> r.copy(results = results) } ?: DiagnosticsRunner.DiagnosticsReport(results = results)
     isRunning = false
 }
                 }, modifier = Modifier.fillMaxWidth(), enabled = !isRunning) {
@@ -384,7 +385,7 @@ fun DiagnosticsScreen(onBack: () -> Unit = {}) {
                     scope.launch {
     isRunning = true
     val results = diagnostics.runCategory("environment")
-    report = if (report != null) report!!.copy(results = results) else null
+    report = report?.let { r -> r.copy(results = results) } ?: DiagnosticsRunner.DiagnosticsReport(results = results)
     isRunning = false
 }
                 }, modifier = Modifier.fillMaxWidth(), enabled = !isRunning) {
@@ -397,7 +398,7 @@ fun DiagnosticsScreen(onBack: () -> Unit = {}) {
                     scope.launch {
     isRunning = true
     val results = diagnostics.runCategory("codex")
-    report = if (report != null) report!!.copy(results = results) else null
+    report = report?.let { r -> r.copy(results = results) } ?: DiagnosticsRunner.DiagnosticsReport(results = results)
     isRunning = false
 }
                 }, modifier = Modifier.fillMaxWidth(), enabled = !isRunning) {

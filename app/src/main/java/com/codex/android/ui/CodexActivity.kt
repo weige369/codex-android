@@ -11,6 +11,7 @@ import android.webkit.WebView
 import androidx.activity.ComponentActivity
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.lifecycle.lifecycleScope
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
@@ -58,6 +59,11 @@ class CodexActivity : ComponentActivity() {
     private var _wsConnected = false
     private var _currentScreen: Screen = Screen.Workspace
 
+    // Compose 响应式状态（由 BroadcastReceiver 更新，Compose 读取）
+    private val _runtimeStateFlow = mutableStateOf(RuntimeState.STOPPED)
+    private val _wsPortFlow = mutableIntStateOf(CodexRuntimeService.DEFAULT_WS_PORT)
+    private val _isRunningFlow = mutableStateOf(false)
+
     // WebView 引用，用于状态转发
     private var _webView: WebView? = null
 
@@ -78,8 +84,6 @@ class CodexActivity : ComponentActivity() {
     ) { granted ->
         if (granted) Log.i(TAG, "通知权限已授予")
     }
-
-    private var stateListener: ((Screen, RuntimeState, Int, Boolean, Boolean) -> Unit)? = null
 
     private val statusReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
@@ -106,7 +110,10 @@ class CodexActivity : ComponentActivity() {
                 }
             }
 
-            stateListener?.invoke(_currentScreen, _runtimeState, _wsPort, _isRuntimeRunning, _wsConnected)
+            // 更新 Compose 响应式状态
+            _runtimeStateFlow.value = _runtimeState
+            _wsPortFlow.intValue = _wsPort
+            _isRunningFlow.value = _isRuntimeRunning
         }
     }
 
@@ -149,13 +156,11 @@ class CodexActivity : ComponentActivity() {
                         var isRunning by remember { mutableStateOf(_isRuntimeRunning) }
                         var wsConnected by remember { mutableStateOf(false) }
 
-                        stateListener = { newScreen, newState, port, running, connected ->
-                            screen = newScreen
-                            runtimeState = newState
-                            wsPort = port
-                            isRunning = running
-                            wsConnected = connected
-                        }
+                        // 状态来自 Activity 的响应式 StateFlow
+                        runtimeState = _runtimeStateFlow.value
+                        wsPort = _wsPortFlow.intValue
+                        isRunning = _isRunningFlow.value
+                        wsConnected = codexBridge.connectionState.value == CodexBridge.ConnectionState.CONNECTED
 
                         when (screen) {
                             Screen.Workspace -> {
@@ -214,7 +219,7 @@ class CodexActivity : ComponentActivity() {
 
     private fun navigateTo(screen: Screen) {
         _currentScreen = screen
-        stateListener?.invoke(screen, _runtimeState, _wsPort, _isRuntimeRunning, _wsConnected)
+        // Navigation handled reactively; Compose recomposes on screen state change
     }
 
     fun setWebViewRef(webView: WebView?) {
@@ -232,10 +237,10 @@ class CodexActivity : ComponentActivity() {
                 android.os.Environment.DIRECTORY_DOWNLOADS
             )
             val exportDir = java.io.File(downloadsDir, "CodexWorkspace")
-            CoroutineScope(Dispatchers.IO).launch {
+            lifecycleScope.launch(Dispatchers.IO) {
                 try {
                     sourceDir.copyRecursively(exportDir, overwrite = true)
-                    CoroutineScope(Dispatchers.Main).launch {
+                    launch(Dispatchers.Main) {
                         android.widget.Toast.makeText(
                             this@CodexActivity,
                             "已导出到: ${exportDir.absolutePath}",
@@ -244,7 +249,7 @@ class CodexActivity : ComponentActivity() {
                         Log.i(TAG, "工作区已导出到: ${exportDir.absolutePath}")
                     }
                 } catch (e: Exception) {
-                    CoroutineScope(Dispatchers.Main).launch {
+                    launch(Dispatchers.Main) {
                         android.widget.Toast.makeText(this@CodexActivity, "导出失败: ${e.message}", android.widget.Toast.LENGTH_SHORT).show()
                     }
                 }
@@ -252,6 +257,27 @@ class CodexActivity : ComponentActivity() {
         } catch (e: Exception) {
             Log.e(TAG, "导出工作区失败", e)
             android.widget.Toast.makeText(this, "导出失败: ${e.message}", android.widget.Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        handleSendIntent(intent)
+    }
+
+    private fun handleSendIntent(intent: Intent?) {
+        if (intent?.action == Intent.ACTION_SEND && intent.type?.startsWith("text/") == true) {
+            val sharedText = intent.getStringExtra(Intent.EXTRA_TEXT) ?: return
+            val sharedSubject = intent.getStringExtra(Intent.EXTRA_SUBJECT) ?: ""
+            Log.i(TAG, "收到分享文本: $sharedSubject - ${sharedText.take(100)}")
+            
+            // 将分享文本设置到 WebView
+            _webView?.post {
+                val jsCode = "window.onSharedText && window.onSharedText(${org.json.JSONObject.quote(sharedText)}, ${org.json.JSONObject.quote(sharedSubject)});"
+                _webView?.evaluateJavascript(jsCode, null)
+            }
+            
+            android.widget.Toast.makeText(this, "文本已分享到 Codex", android.widget.Toast.LENGTH_SHORT).show()
         }
     }
 

@@ -241,9 +241,6 @@ class CodexRuntimeService : Service() {
      * 在 Ubuntu proot 中启动 Codex
      */
     private suspend fun startInUbuntu(envInfo: DevelopmentEnvironment.EnvInfo) {
-        addLog("安装 Codex 到 Ubuntu 环境...")
-        devEnv.installBinaryToTermux(codexManager.codexBinary, "codex")
-
         val startCmd = buildString {
             append("proot-distro login ubuntu -- bash -c '")
             append("export HOME=/root && ")
@@ -255,37 +252,13 @@ class CodexRuntimeService : Service() {
             append("--skip-git-repo-check ")
             append("2>&1'")
         }
-
-        codexProcess = devEnv.runInTermux(startCmd)
-        isRunning = true
-
-        serviceScope.launch {
-            try {
-                codexProcess?.inputStream?.bufferedReader()?.use { reader ->
-                    reader.lines().forEach { line ->
-                        addLog("[Codex] $line")
-                        if (line.contains("listening", ignoreCase = true) ||
-                            line.contains("started", ignoreCase = true) ||
-                            line.contains("ready", ignoreCase = true)) {
-                            _state.value = RuntimeState.RUNNING
-                            updateNotification("Codex 已就绪")
-                            broadcastStatus()
-                        }
-                    }
-                }
-            } catch (e: Exception) {
-                addLog("Codex 输出流已关闭: ${e.message}")
-            }
-        }
+        startCodexProcess(startCmd, "Ubuntu")
     }
 
     /**
      * 在 Termux 中启动 Codex
      */
     private suspend fun startInTermux() {
-        addLog("安装 Codex 到 Termux...")
-        devEnv.installBinaryToTermux(codexManager.codexBinary, "codex")
-
         val startCmd = buildString {
             append("cd ~ && ")
             append("export CODEX_CONFIG_DIR='${codexManager.getConfigDir().absolutePath}' && ")
@@ -295,28 +268,7 @@ class CodexRuntimeService : Service() {
             append("--skip-git-repo-check ")
             append("2>&1")
         }
-
-        codexProcess = devEnv.runInTermux(startCmd)
-        isRunning = true
-
-        serviceScope.launch {
-            try {
-                codexProcess?.inputStream?.bufferedReader()?.use { reader ->
-                    reader.lines().forEach { line ->
-                        addLog("[Codex] $line")
-                        if (line.contains("listening", ignoreCase = true) ||
-                            line.contains("started", ignoreCase = true) ||
-                            line.contains("ready", ignoreCase = true)) {
-                            _state.value = RuntimeState.RUNNING
-                            updateNotification("Codex 已就绪")
-                            broadcastStatus()
-                        }
-                    }
-                }
-            } catch (e: Exception) {
-                addLog("Codex 输出流已关闭: ${e.message}")
-            }
-        }
+        startCodexProcess(startCmd, "Termux")
     }
 
     /**
@@ -375,6 +327,36 @@ class CodexRuntimeService : Service() {
         addLog("Codex 已停止")
     }
 
+
+    /**
+     * 通用的 Codex 进程启动方法
+     */
+    private suspend fun startCodexProcess(launchCmd: String, modeName: String) {
+        addLog("安装 Codex 到 $modeName 环境...")
+        devEnv.installBinaryToTermux(codexManager.codexBinary, "codex")
+
+        codexProcess = devEnv.runInTermux(launchCmd)
+        isRunning = true
+
+        serviceScope.launch {
+            try {
+                codexProcess?.inputStream?.bufferedReader()?.use { reader ->
+                    reader.lines().forEach { line ->
+                        addLog("[Codex] $line")
+                        if (line.contains("listening", ignoreCase = true) ||
+                            line.contains("started", ignoreCase = true) ||
+                            line.contains("ready", ignoreCase = true)) {
+                            _state.value = RuntimeState.RUNNING
+                            updateNotification("Codex 已就绪")
+                            broadcastStatus()
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                addLog("Codex 输出流已关闭: ${e.message}")
+            }
+        }
+    }
     private fun broadcastStatus() {
         val intent = Intent("com.codex.android.CODEX_STATUS").apply {
             putExtra("state", _state.value.name)
@@ -411,6 +393,14 @@ class CodexRuntimeService : Service() {
             packageManager.getLaunchIntentForPackage(packageName),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
+
+        // 停止按钮
+        val stopIntent = PendingIntent.getService(
+            this, 1,
+            Intent(this, CodexRuntimeService::class.java).apply { action = ACTION_STOP },
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("Codex AI")
             .setContentText(content)
@@ -418,6 +408,7 @@ class CodexRuntimeService : Service() {
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setContentIntent(pendingIntent)
             .setOngoing(true)
+            .addAction(android.R.drawable.ic_media_pause, "停止", stopIntent)
             .build()
     }
 
@@ -427,7 +418,10 @@ class CodexRuntimeService : Service() {
 
     private fun addLog(message: String) {
         val timestamp = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date())
-        synchronized(logsLock) { _logs.value = _logs.value + "[$timestamp] $message" }
+        synchronized(logsLock) {
+            val newLogs = _logs.value + "[$timestamp] $message"
+            _logs.value = if (newLogs.size > 500) newLogs.takeLast(200) else newLogs
+        }
         Log.d(TAG, message)
     }
 }

@@ -7,6 +7,7 @@ import kotlinx.coroutines.withContext
 import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
@@ -47,7 +48,7 @@ object AndroidShellExecutor {
         val permissionLevel: PermissionLevel
     )
 
-    private val activeProcesses = mutableMapOf<Int, Process>()
+    private val activeProcesses = ConcurrentHashMap<Int, Process>()
     private val processHistory = mutableListOf<ProcessInfo>()
     private val pidCounter = AtomicInteger(0)
 

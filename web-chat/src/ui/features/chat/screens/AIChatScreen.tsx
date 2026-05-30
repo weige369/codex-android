@@ -1,11 +1,60 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { ChatScreenContent } from '../components/ChatScreenContent';
 import { ConfigurationScreen } from './ConfigurationScreen';
+import { prefetchGlassSurface } from '../components/part/GlassSurface';
 import { buildChatFontFaceCss, buildChatThemeStyle } from '../util/chatTheme';
+import type { WebThemeSnapshot } from '../util/chatTypes';
 import { useChatViewModel } from '../viewmodel/ChatViewModel';
+
+function themeUsesGlass(theme: WebThemeSnapshot | null): boolean {
+  if (!theme) {
+    return false;
+  }
+  const input = theme.input;
+  const bubble = theme.bubble;
+  return Boolean(
+    input?.liquid_glass ||
+      input?.water_glass ||
+      bubble?.cursor_user_liquid_glass ||
+      bubble?.cursor_user_water_glass ||
+      bubble?.user_liquid_glass ||
+      bubble?.user_water_glass ||
+      bubble?.assistant_liquid_glass ||
+      bubble?.assistant_water_glass
+  );
+}
 
 export function AIChatScreen() {
   const viewModel = useChatViewModel();
+  const glassPrefetchedRef = useRef(false);
+
+  // Once the user has connected (overlay dismissed), warm the lazy glass chunk
+  // during idle time — but only when the active theme actually uses glass — so
+  // the first glass-themed message doesn't flash plain -> glass on a slow phone.
+  // Deliberately gated on the overlay being dismissed so the chunk never re-enters
+  // the connection-overlay critical path.
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+    if (viewModel.showConnectionOverlay || glassPrefetchedRef.current) {
+      return;
+    }
+    if (!themeUsesGlass(viewModel.theme)) {
+      return;
+    }
+    glassPrefetchedRef.current = true;
+
+    const run = () => {
+      void prefetchGlassSurface();
+    };
+    if (typeof window.requestIdleCallback === 'function') {
+      const id = window.requestIdleCallback(run);
+      return () => window.cancelIdleCallback?.(id);
+    }
+    const id = window.setTimeout(run, 200);
+    return () => window.clearTimeout(id);
+  }, [viewModel.showConnectionOverlay, viewModel.theme]);
   const fontFaceCss = buildChatFontFaceCss(viewModel.theme);
   const chatThemeStyle = useMemo(
     () => buildChatThemeStyle(viewModel.theme, viewModel.chatThemeId),

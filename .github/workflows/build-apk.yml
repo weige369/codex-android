@@ -85,19 +85,61 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: bash
+      - name: Decode release keystore
+        id: signing
+        if: steps.changes.outputs.changed == 'true'
+        env:
+          RELEASE_KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
+          RELEASE_STORE_PASSWORD: ${{ secrets.RELEASE_STORE_PASSWORD }}
+          RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+          RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
+        run: |
+          # Only sign a release build when ALL signing secrets are present.
+          # Forks / PRs without secret access fall back to a debug build so the
+          # gate still verifies the project compiles.
+          if [ -n "$RELEASE_KEYSTORE_BASE64" ] && [ -n "$RELEASE_STORE_PASSWORD" ] \
+             && [ -n "$RELEASE_KEY_ALIAS" ] && [ -n "$RELEASE_KEY_PASSWORD" ]; then
+            KEYSTORE_PATH="$RUNNER_TEMP/release-keystore.jks"
+            echo "$RELEASE_KEYSTORE_BASE64" | base64 -d > "$KEYSTORE_PATH"
+            # build.gradle.kts reads these from local.properties.
+            {
+              echo "RELEASE_STORE_FILE=$KEYSTORE_PATH"
+              echo "RELEASE_STORE_PASSWORD=$RELEASE_STORE_PASSWORD"
+              echo "RELEASE_KEY_ALIAS=$RELEASE_KEY_ALIAS"
+              echo "RELEASE_KEY_PASSWORD=$RELEASE_KEY_PASSWORD"
+            } >> local.properties
+            echo "signed=true" >> "$GITHUB_OUTPUT"
+            echo "Release signing configured."
+          else
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+            echo "No signing secrets available; falling back to a debug build."
+          fi
+        shell: bash
       - name: Build
         if: steps.changes.outputs.changed == 'true'
         run: |
           chmod +x gradlew
-          ./gradlew assembleDebug --no-daemon --stacktrace 2>&1 | tee build.log
+          if [ "${{ steps.signing.outputs.signed }}" = "true" ]; then
+            ./gradlew assembleRelease --no-daemon --stacktrace 2>&1 | tee build.log
+          else
+            ./gradlew assembleDebug --no-daemon --stacktrace 2>&1 | tee build.log
+          fi
+        shell: bash
       - name: Upload Build Log
         if: always() && steps.changes.outputs.changed == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: build-log
           path: build.log
-      - name: Upload APK
-        if: success() && steps.changes.outputs.changed == 'true'
+      - name: Upload signed release APK
+        if: success() && steps.changes.outputs.changed == 'true' && steps.signing.outputs.signed == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Codex-Android-APK
+          path: app/build/outputs/apk/release/*.apk
+          if-no-files-found: error
+      - name: Upload debug APK (unsigned fallback)
+        if: success() && steps.changes.outputs.changed == 'true' && steps.signing.outputs.signed != 'true'
         uses: actions/upload-artifact@v4
         with:
           name: Codex-Android-APK

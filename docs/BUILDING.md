@@ -292,6 +292,23 @@ app/build/outputs/apk/debug/app-debug.apk
 
 **Android 构建回归检查（PR 必过）：** 同样的 `./gradlew assembleDebug` 编译也通过 GitHub Actions（`.github/workflows/build-apk.yml`）在每个 Pull Request 上运行，对应的检查名为 **`Android APK Build`**，并已在 `main` 分支被设为**必过状态检查（required status check）**：编译失败的 PR 无法合入 `main`，从而把破坏 Android 构建的改动挡在合入之前，而不是等代码进了 `main` 才被发现。该工作流沿用了与首屏检查相同的 git-diff 路径过滤——只有当 PR 改动了与 Android 构建相关的路径（如 `app/**`、各原生模块、Gradle 配置或该工作流文件本身）时才会真正执行完整构建（JDK + Android SDK + NDK 很重），其它 PR 会直接通过这项检查，因此既不会因为路径过滤而把无关 PR 永久卡住，也不会让它们付出完整构建的代价。
 
+### 发布签名（Release signing）
+
+正式发布版需要用一个**密钥库（keystore）**签名。`app/build.gradle.kts` 会从根目录的 `local.properties`（已被 Git 忽略）读取以下四个键，**四个都存在且 keystore 文件真实存在时**才会启用 release 签名配置：
+
+```
+RELEASE_STORE_FILE=/绝对路径/release-keystore.jks
+RELEASE_STORE_PASSWORD=<store 密码>
+RELEASE_KEY_ALIAS=<key 别名>
+RELEASE_KEY_PASSWORD=<key 密码>
+```
+
+本地手动出签名包：填好上面四个键后运行 `./gradlew assembleRelease`，产物在 `app/build/outputs/apk/release/`。
+
+**CI 自动签名：** `build-apk.yml` 会在构建前检查仓库的四个 GitHub Actions Secrets——`RELEASE_KEYSTORE_BASE64`（keystore 的 base64）、`RELEASE_STORE_PASSWORD`、`RELEASE_KEY_ALIAS`、`RELEASE_KEY_PASSWORD`。四个都齐时：把 keystore 解码到 runner 临时目录、写入 `local.properties`，然后跑 `assembleRelease`，并把**已签名的 release APK** 作为名为 `Codex-Android-APK` 的 artifact 上传。缺任意一个 secret（例如来自 fork 的 PR 拿不到 secret）时，自动回退到 `assembleDebug`，仍上传 debug 包，保证编译门禁照常工作。
+
+> ⚠️ **务必备份 keystore 与密码。** 一旦丢失，就再也无法用同一签名身份给已发布的应用推送更新，且无法恢复。GitHub Secrets 里的值无法再次读回，请另行离线保存。
+
 ## **7. 常见问题排查**
 
 | 错误信息 | 解决方案 |

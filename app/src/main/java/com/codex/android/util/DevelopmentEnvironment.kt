@@ -8,6 +8,11 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.BufferedReader
 import java.io.InputStreamReader
+import java.io.FileOutputStream
+import java.net.HttpURLConnection
+import java.net.URL
+import java.util.zip.GZIPInputStream
+import org.apache.commons.compress.archivers.tar.TarArchiveInputStream
 
 /**
  * 开发环境管理器（自包含模式）。
@@ -16,7 +21,7 @@ import java.io.InputStreamReader
  * 使用 APP 内置目录和 Android 系统 shell 实现自包含运行。
  * 如果 Termux 已安装且初始化完成，则优先使用 Termux 环境。
  */
-class DevelopmentEnvironment(private val context: Context) {
+class DevelopmentEnvironment(val context: Context) {
 
     companion object {
         private const val TAG = "DevelopmentEnvironment"
@@ -44,8 +49,10 @@ class DevelopmentEnvironment(private val context: Context) {
      * 环境状态
      */
     enum class EnvState {
-        /** 自包含模式（无 Termux） */
+        /** 自包含模式（无 Termux 无 Linux） */
         SELF_CONTAINED,
+        /** 自包含 Linux（proot + rootfs）已就绪 */
+        SELF_CONTAINED_LINUX,
         /** Termux 已安装 */
         TERMUX_READY,
         /** Ubuntu 已安装 */
@@ -65,6 +72,7 @@ class DevelopmentEnvironment(private val context: Context) {
         val hasGit: Boolean = false,
         val hasUbuntu: Boolean = false,
         val hasCodex: Boolean = false,
+        val hasProot: Boolean = false,
         val nodeVersion: String = "",
         val pythonVersion: String = "",
         val gitVersion: String = "",
@@ -104,7 +112,23 @@ class DevelopmentEnvironment(private val context: Context) {
         val appBinDir = getAppBinDir()
         val hasCodexSelf = File(appBinDir, "codex").canExecute()
 
+        // 检测自包含 Linux 环境
+        val linuxEnv = LinuxEnvironment(context)
+        val linuxInfo = linuxEnv.getInfo()
+        val hasSelfContainedLinux = linuxInfo.state == LinuxEnvironment.EngineState.READY
+
         if (!detectTermux()) {
+            if (hasSelfContainedLinux) {
+                return@withContext EnvInfo(
+                    state = EnvState.SELF_CONTAINED_LINUX,
+                    hasCodex = hasCodexSelf,
+                    hasNodeJs = false,
+                    hasPython = false,
+                    hasGit = false,
+                    hasUbuntu = true,
+                    ubuntuVersion = "24.04 LTS (proot)"
+                )
+            }
             return@withContext EnvInfo(
                 state = EnvState.SELF_CONTAINED,
                 hasCodex = hasCodexSelf
@@ -135,6 +159,7 @@ class DevelopmentEnvironment(private val context: Context) {
 
             val state = when {
                 hasUbuntu -> EnvState.UBUNTU_READY
+                hasSelfContainedLinux -> EnvState.SELF_CONTAINED_LINUX
                 else -> EnvState.TERMUX_READY
             }
 
@@ -470,6 +495,42 @@ class DevelopmentEnvironment(private val context: Context) {
             Log.e(TAG, "安装 Ubuntu 失败", e)
             false
         }
+    }
+
+    /**
+     * 创建 proot 进程（供 AndroidShellExecutor 使用）
+     */
+    fun createProotProcess(command: String, env: Map<String, String> = emptyMap()): java.lang.Process {
+        val linuxEnv = LinuxEnvironment(context)
+        val cmd = linuxEnv.buildProotCommand(command)
+        val prootEnv = linuxEnv.getProotEnv()
+
+        return ProcessBuilder(cmd)
+            .apply {
+                environment().putAll(prootEnv)
+                environment().putAll(env)
+                redirectErrorStream(false)
+            }
+            .start()
+    }
+
+    /**
+     * 安装自包含 Linux 环境（proot + Ubuntu rootfs）
+     */
+    suspend fun installSelfContainedLinux(
+        onProgress: ((Long, Long) -> Unit)? = null,
+        onStatus: ((String) -> Unit)? = null
+    ): Boolean {
+        val linuxEnv = LinuxEnvironment(context)
+        return linuxEnv.installRootfs(onProgress, onStatus)
+    }
+
+    /**
+     * 检查自包含 Linux 状态
+     */
+    fun getSelfContainedLinuxInfo(): LinuxEnvironment.LinuxEnvInfo {
+        val linuxEnv = LinuxEnvironment(context)
+        return linuxEnv.getInfo()
     }
 
     fun getSetupGuide(): String {

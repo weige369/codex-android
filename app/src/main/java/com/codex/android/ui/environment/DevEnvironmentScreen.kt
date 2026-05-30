@@ -28,13 +28,14 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.codex.android.util.DevelopmentEnvironment
+import com.codex.android.util.LinuxEnvironment
 import kotlinx.coroutines.launch
 
 /**
  * 开发环境管理界面。
  *
  * 管理：
- * - Termux 安装引导
+ * - Termux 安装引导（备选方案）
  * - Ubuntu 环境（proot-distro）
  * - Node.js / Python / Git 等工具
  * - 环境状态检测与修复
@@ -93,8 +94,43 @@ fun DevEnvironmentScreen(
                 )
             }
 
-            // ===== Termux 安装引导 =====
-            if (envInfo?.state == DevelopmentEnvironment.EnvState.ERROR || envInfo?.state == DevelopmentEnvironment.EnvState.SELF_CONTAINED) {
+            // ===== 自包含 Linux 安装引导 =====
+            if (envInfo?.state == DevelopmentEnvironment.EnvState.SELF_CONTAINED || envInfo?.state == DevelopmentEnvironment.EnvState.ERROR) {
+                item {
+                    SelfContainedLinuxCard(
+                        onInstall = {
+                            isInstalling = true
+                            installLog = ""
+                            currentAction = "安装自包含 Linux"
+                            scope.launch {
+                                val linuxEnv = LinuxEnvironment(context)
+                                val ok = linuxEnv.installRootfs(
+                                    onProgress = { progress, total ->
+                                        installProgress = if (total > 0) "${progress * 100 / total}%" else "${progress / 1024 / 1024}MB"
+                                    },
+                                    onStatus = { msg ->
+                                        installLog = msg
+                                    }
+                                )
+                                if (ok) {
+                                    installLog = "✅ 自包含 Linux 安装成功!"
+                                    envInfo = devEnv.getEnvironmentInfo()
+                                } else {
+                                    installLog = "❌ 安装失败，请检查网络后重试"
+                                }
+                                isInstalling = false
+                                currentAction = null
+                            }
+                        },
+                        isInstalling = isInstalling,
+                        installLog = installLog,
+                        installProgress = installProgress
+                    )
+                }
+            }
+
+            // ===== Termux 安装引导（备选方案） =====
+            if (envInfo?.state == DevelopmentEnvironment.EnvState.ERROR) {
                 item {
                     TermuxSetupCard(
                         onInstallTermux = {
@@ -295,15 +331,18 @@ private fun EnvironmentStatusCard(
                             Triple(Icons.Default.CheckCircle, Color(0xFF2ED573), "Ubuntu 已安装（可运行 Codex）")
                         DevelopmentEnvironment.EnvState.TERMUX_READY ->
                             Triple(Icons.Default.CheckCircle, Color(0xFF2ED573), "Termux 已安装（可运行 Codex）")
+                        DevelopmentEnvironment.EnvState.SELF_CONTAINED_LINUX ->
+                            Triple(Icons.Default.CheckCircle, Color(0xFF2ED573), "自包含 Linux 已就绪（可运行 Codex）")
                         DevelopmentEnvironment.EnvState.SELF_CONTAINED ->
-                            Triple(Icons.Default.Warning, Color(0xFFFFA502), "⚠️ 受限模式（无法运行 Codex）")
+                            Triple(Icons.Default.Warning, Color(0xFFFFA502), "受限模式（无法运行 Codex）")
                         DevelopmentEnvironment.EnvState.ERROR ->
                             Triple(Icons.Default.Error, Color(0xFFFF4757), "环境异常")
                     }
                     val description = when (envInfo.state) {
                         DevelopmentEnvironment.EnvState.SELF_CONTAINED ->
-                            "未检测到 Termux。Codex 为 Linux 二进制，Android 无法直接运行，" +
-                                "需安装 Termux + Ubuntu 后才能真正启动 Codex。"
+                            "未检测到 Termux。Codex 为 Linux 二进制，Android 无法直接运行，请安装内置 Linux 环境。"
+                        DevelopmentEnvironment.EnvState.SELF_CONTAINED_LINUX ->
+                            "自包含 Linux 环境已就绪，可通过 proot 运行 Codex。"
                         DevelopmentEnvironment.EnvState.TERMUX_READY ->
                             "建议继续安装 Ubuntu 以获得完整开发环境。"
                         else -> ""
@@ -331,7 +370,7 @@ private fun EnvironmentStatusCard(
     }
 }
 
-// ===== Termux 安装引导 =====
+// ===== Termux 安装引导（备选方案） =====
 @Composable
 private fun TermuxSetupCard(onInstallTermux: () -> Unit) {
     val context = LocalContext.current
@@ -485,7 +524,94 @@ private fun SetupStep(
     }
 }
 
+// ===== 自包含 Linux 安装卡片 =====
+@Composable
+private fun SelfContainedLinuxCard(
+    onInstall: () -> Unit,
+    isInstalling: Boolean,
+    installLog: String,
+    installProgress: String
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
+        )
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    Icons.Default.Terminal,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(28.dp)
+                )
+                Spacer(Modifier.width(10.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        "内置 Linux 环境（免 Termux）",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 15.sp
+                    )
+                    Text(
+                        "一键安装 Ubuntu 24.04 LTS，无需额外 App",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+            Spacer(Modifier.height(12.dp))
+            Text(
+                "本功能使用 proot 引擎在 App 内创建独立的 Linux 环境，自动下载并安装 Ubuntu 根文件系统（约 37MB）。",
+                fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(Modifier.height(12.dp))
+            Button(
+                onClick = onInstall,
+                enabled = !isInstalling,
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.primary
+                )
+            ) {
+                if (isInstalling) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(16.dp),
+                        strokeWidth = 2.dp,
+                        color = MaterialTheme.colorScheme.onPrimary
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text("安装中 $installProgress")
+                } else {
+                    Icon(Icons.Default.Download, null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("一键安装 Linux 环境")
+                }
+            }
+            if (installLog.isNotBlank()) {
+                Spacer(Modifier.height(8.dp))
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = Color(0xFF0A0A0F)
+                ) {
+                    Text(
+                        installLog.lines().dropWhile { it.isEmpty() }.joinToString("\n"),
+                        fontSize = 11.sp,
+                        fontFamily = FontFamily.Monospace,
+                        color = Color(0xFF4AF626),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(10.dp)
+                    )
+                }
+            }
+        }
+    }
+}
+
 // ===== 可复制命令行 =====
+
 @Composable
 private fun CopyableCommand(command: String, onCopy: (String) -> Unit) {
     Surface(

@@ -10,6 +10,7 @@ import androidx.core.app.NotificationCompat
 import com.codex.android.codex.CodexManager
 import com.codex.android.util.AndroidShellExecutor
 import com.codex.android.util.DevelopmentEnvironment
+import com.codex.android.util.LinuxEnvironment
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -128,26 +129,47 @@ class CodexRuntimeService : Service() {
             val useTermux = devEnv.detectTermux()
             val envInfo = if (useTermux) devEnv.getEnvironmentInfo() else DevelopmentEnvironment.EnvInfo()
 
+            // 优先使用自包含 Linux 环境（免 Termux proot + Ubuntu）
+            val linuxEnv = LinuxEnvironment(this)
+            val linuxInfo = linuxEnv.getInfo()
+            val hasSelfContainedLinux = linuxInfo.state == LinuxEnvironment.EngineState.READY
+
+            // 也检查 Termux Ubuntu 的可用性
+            val hasUbuntu = if (useTermux) envInfo.hasUbuntu else false
+
             _runningMode = when {
-                envInfo.hasUbuntu -> "ubuntu"
+                hasSelfContainedLinux -> "proot-linux"
+                hasUbuntu -> "ubuntu"
                 useTermux -> "termux"
                 else -> "direct"
             }
             addLog("运行环境: $_runningMode (${
                 when(_runningMode) {
-                    "ubuntu" -> "Ubuntu proot"
+                    "proot-linux" -> "自包含 proot Linux"
+                    "ubuntu" -> "Termux Ubuntu proot"
                     "termux" -> "Termux"
                     else -> "Android 原生 (自包含)"
                 }
             })")
 
-            if (!useTermux) {
-                addLog("使用自包含模式运行（无需 Termux）")
+            if (!useTermux && !hasSelfContainedLinux) {
+                addLog("使用自包含模式运行（无需 Termux，但无法运行 Codex）")
+            }
+            if (hasSelfContainedLinux) {
+                addLog("自包含 Linux 环境已就绪，将通过 proot 运行 Codex")
             }
 
             // 下载/验证二进制
             _state.value = RuntimeState.STARTING
             addLog("检查 Codex 二进制文件...")
+
+            if (hasSelfContainedLinux && codexManager.isInstalled()) {
+                // 自包含 Linux 模式：将 Codex 二进制复制到 rootfs 中运行
+                addLog("自包含 Linux 模式启动...")
+                _state.value = RuntimeState.STARTING
+                startCodexInProot(linuxInfo)
+                return
+            }
 
             if (!codexManager.isInstalled()) {
                 _state.value = RuntimeState.DOWNLOADING
@@ -381,6 +403,64 @@ class CodexRuntimeService : Service() {
             }
         }
     }
+    /**
+     * 在自包含 Linux（proot）环境中启动 Codex
+     */
+    private suspend fun startCodexInProot(linuxInfo: LinuxEnvironment.LinuxEnvInfo) {
+        try {
+            val linuxEnv = LinuxEnvironment(this)
+            
+            // 将 Codex 二进制复制到 rootfs 中
+            addLog("安装 Codex 到 proot rootfs...")
+            val rootfsBin = File(linuxInfo.rootfsPath, "/usr/local/bin")
+            rootfsBin.mkdirs()
+            codexManager.codexBinary.inputStream().use { input ->
+                File(rootfsBin, "codex").outputStream().use { output ->
+                    input.copyTo(output)
+                }
+            }
+            File(rootfsBin, "codex").setExecutable(true)
+
+            // 构建启动命令
+            addLog("通过 proot 启动 Codex...")
+            val launchCmd = "codex --unix-daemon --http-port $_wsPort --ws-port $_wsPort"
+            val cmd = linuxEnv.buildProotCommand(launchCmd)
+            val prootEnv = linuxEnv.getProotEnv()
+
+            codexProcess = ProcessBuilder(cmd)
+                .apply {
+                    environment().putAll(prootEnv)
+                    redirectErrorStream(false)
+                }
+                .start()
+            isRunning = true
+
+            // 监控输出
+            serviceScope.launch {
+                try {
+                    codexProcess?.inputStream?.bufferedReader()?.use { reader ->
+                        reader.lines().forEach { line ->
+                            addLog("[Codex-proot] $line")
+                            if (line.contains("listening", ignoreCase = true) ||
+                                line.contains("started", ignoreCase = true) ||
+                                line.contains("ready", ignoreCase = true)) {
+                                _state.value = RuntimeState.RUNNING
+                                updateNotification("Codex 已就绪 (自包含 Linux)")
+                                broadcastStatus()
+                            }
+                        }
+                    }
+                } catch (e: Exception) {
+                    addLog("Codex proot 输出流已关闭: ${e.message}")
+                }
+            }
+        } catch (e: Exception) {
+            addLog("自包含 Linux 启动失败: ${e.message}")
+            _state.value = RuntimeState.ERROR
+            updateNotification("Codex 启动失败（自包含 Linux）")
+        }
+    }
+
     private fun broadcastStatus() {
         val intent = Intent("com.codex.android.CODEX_STATUS").apply {
             putExtra("state", _state.value.name)

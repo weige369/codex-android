@@ -10,6 +10,7 @@ import com.codex.android.bridge.CodexBridge
 import com.codex.android.codex.CodexManager
 import com.codex.android.util.AndroidShellExecutor
 import com.codex.android.util.DevelopmentEnvironment
+import com.codex.android.util.LinuxEnvironment
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -527,14 +528,33 @@ class DiagnosticsRunner(private val context: Context) {
     private suspend fun runDevEnvironmentTests(): List<TestResult> {
         val results = mutableListOf<TestResult>()
         val devEnv = DevelopmentEnvironment(context)
+        val linuxEnv = LinuxEnvironment(context)
+        val linuxInfo = linuxEnv.getInfo()
 
-        // Termux 检测（运行 Codex 必需）
+        // 自包含 Linux（proot）检测
+        val hasSelfContainedLinux = linuxInfo.state == LinuxEnvironment.EngineState.READY
+        results.add(TestResult(
+            "自包含 Linux (proot)", hasSelfContainedLinux,
+            when (linuxInfo.state) {
+                LinuxEnvironment.EngineState.READY -> "已就绪 (proot + Ubuntu rootfs)"
+                LinuxEnvironment.EngineState.NOT_INSTALLED -> "proot 就绪，未安装 rootfs"
+                LinuxEnvironment.EngineState.UNAVAILABLE -> "proot 引擎缺失: ${linuxInfo.errorMessage}"
+                LinuxEnvironment.EngineState.ERROR -> "错误: ${linuxInfo.errorMessage}"
+                else -> "未知状态"
+            },
+            severity = if (hasSelfContainedLinux) Severity.INFO else Severity.WARNING,
+            suggestion = if (!hasSelfContainedLinux && linuxInfo.state == LinuxEnvironment.EngineState.NOT_INSTALLED)
+                "请在开发环境页面点击【安装 Linux 环境】一键安装" else ""
+        ))
+
+        // Termux 检测
         val hasTermux = devEnv.detectTermux()
         results.add(TestResult(
-            "Termux (运行 Codex 必需)", hasTermux,
-            if (hasTermux) "已安装" else "未安装（受限模式，无法运行 Codex）",
-            severity = if (hasTermux) Severity.INFO else Severity.WARNING,
-            suggestion = if (!hasTermux) "请从 F-Droid 安装 Termux + Ubuntu 后才能运行 Codex" else ""
+            "Termux", hasTermux,
+            if (hasTermux) "已安装" else "未安装",
+            severity = if (hasTermux || hasSelfContainedLinux) Severity.INFO else Severity.WARNING,
+            suggestion = if (!hasTermux && !hasSelfContainedLinux)
+                "请安装自包含 Linux 或从 F-Droid 安装 Termux" else ""
         ))
 
         if (hasTermux) {

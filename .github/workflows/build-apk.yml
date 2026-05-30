@@ -127,6 +127,49 @@ jobs:
           yes | sdkmanager "platforms;android-36" "ndk;27.0.12077973" --sdk_root=$ANDROID_HOME || true
           echo "Platforms and NDK installed."
         shell: bash
+      - name: Bundle proot engine
+        if: steps.changes.outputs.changed == 'true'
+        run: |
+          JNILIBS_ARM64="app/src/main/jniLibs/arm64-v8a"
+          mkdir -p "$JNILIBS_ARM64"
+          echo "=== Downloading proot static binary for arm64 ==="
+          curl -sL -o "$JNILIBS_ARM64/libproot.so" "https://github.com/proot-me/proot/releases/download/v5.3.0/proot-v5.3.0-aarch64-static" || {
+            echo "GitHub unreachable, trying mirror..."
+            curl -sL -o "$JNILIBS_ARM64/libproot.so" "https://mirror.ghproxy.com/https://github.com/proot-me/proot/releases/download/v5.3.0/proot-v5.3.0-aarch64-static" || {
+              echo "Falling back to Termux proot package..."
+              mkdir -p /tmp/proot-bundle
+              cd /tmp/proot-bundle
+              curl -sL -o proot.deb "https://packages.termux.dev/apt/termux-main/pool/main/p/proot/proot_5.1.107.72_aarch64.deb"
+              ar x proot.deb
+              for f in data.tar.*; do case "$f" in *.xz) tar xJf "$f"; esac; done
+              cp ./data/data/com.termux/files/usr/bin/proot "$JNILIBS_ARM64/libproot.so"
+              cp ./data/data/com.termux/files/usr/libexec/proot/loader "$JNILIBS_ARM64/libproot-loader.so"
+              cp ./data/data/com.termux/files/usr/libexec/proot/loader32 "$JNILIBS_ARM64/libproot-loader32.so"
+            }
+          }
+          chmod +x "$JNILIBS_ARM64/libproot.so" 2>/dev/null || true
+          file "$JNILIBS_ARM64/libproot.so"
+          echo "=== Proot engine bundled ==="
+        shell: bash
+      - name: Bundle libtalloc (proot dependency)
+        if: steps.changes.outputs.changed == 'true'
+        run: |
+          JNILIBS_ARM64="app/src/main/jniLibs/arm64-v8a"
+          # Check if proot from Termux needs libtalloc
+          if readelf -d "$JNILIBS_ARM64/libproot.so" 2>/dev/null | grep -q "NEEDED.*talloc"; then
+            echo "=== Downloading libtalloc ==="
+            mkdir -p /tmp/talloc-bundle
+            cd /tmp/talloc-bundle
+            curl -sL -o libtalloc.deb "https://packages.termux.dev/apt/termux-main/pool/main/libt/libtalloc/libtalloc_2.4.3_aarch64.deb"
+            ar x libtalloc.deb
+            for f in data.tar.*; do case "$f" in *.xz) tar xJf "$f"; esac; done
+            cp ./data/data/com.termux/files/usr/lib/libtalloc.so.2.4.3 "$JNILIBS_ARM64/libtalloc.so"
+            chmod +x "$JNILIBS_ARM64/libtalloc.so"
+            echo "=== libtalloc bundled ==="
+          else
+            echo "Static proot, no talloc needed"
+          fi
+        shell: bash
       - name: Build
         if: steps.changes.outputs.changed == 'true'
         run: |

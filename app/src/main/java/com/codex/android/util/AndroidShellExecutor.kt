@@ -29,6 +29,7 @@ object AndroidShellExecutor {
         NORMAL,
         TERMUX,
         UBUNTU,
+        UBUNTU_PROOT,
         SHIZUKU,
         ROOT
     }
@@ -113,6 +114,16 @@ object AndroidShellExecutor {
                 val envObj = devEnv
                 if (envObj != null && envObj.detectTermux()) {
                     envObj.runInTermux(command, env)
+                } else {
+                    ProcessBuilder("sh", "-c", command)
+                        .apply { environment().putAll(env) }
+                        .start()
+                }
+            }
+            PermissionLevel.UBUNTU_PROOT -> {
+                val envObj = devEnv
+                if (envObj != null) {
+                    envObj.createProotProcess(command, env)
                 } else {
                     ProcessBuilder("sh", "-c", command)
                         .apply { environment().putAll(env) }

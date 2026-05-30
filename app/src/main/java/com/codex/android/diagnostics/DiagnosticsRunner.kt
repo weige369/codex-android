@@ -200,7 +200,10 @@ class DiagnosticsRunner(private val context: Context) {
             conn.connectTimeout = 5000
             conn.readTimeout = 5000
             conn.responseCode == 200
-        } catch (e: Exception) { false }
+        } catch (e: Exception) {
+            Log.w(TAG, "GitHub API 可达性探测失败", e)
+            false
+        }
         results.add(TestResult(
             "GitHub API 可达", githubReachable,
             if (githubReachable) "正常" else "连接失败",
@@ -215,7 +218,10 @@ class DiagnosticsRunner(private val context: Context) {
             conn.connectTimeout = 5000
             conn.readTimeout = 5000
             conn.responseCode in 200..499
-        } catch (e: Exception) { false }
+        } catch (e: Exception) {
+            Log.w(TAG, "OpenAI API 可达性探测失败", e)
+            false
+        }
         results.add(TestResult(
             "OpenAI API 可达", openaiReachable,
             if (openaiReachable) "正常" else "连接失败",
@@ -396,6 +402,7 @@ class DiagnosticsRunner(private val context: Context) {
                 statusDetail = if (reachable) "可达 (HTTP $code)" else "不可用 (HTTP $code)"
                 conn.disconnect()
             } catch (e: Exception) {
+                Log.w(TAG, "下载镜像可达性探测失败: $host", e)
                 statusDetail = "连接失败 (${e.javaClass.simpleName})"
             }
             if (reachable) anyMirrorReachable = true

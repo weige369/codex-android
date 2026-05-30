@@ -91,6 +91,7 @@ class DevelopmentEnvironment(private val context: Context) {
             // 验证 Termux bash 是否可执行
             File(TERMUX_BASH).canExecute()
         } catch (e: Exception) {
+            Log.w(TAG, "检测 Termux 失败，按未安装处理: ${e.message}")
             false
         }
     }
@@ -121,7 +122,10 @@ class DevelopmentEnvironment(private val context: Context) {
             val codexCheck = runInExternalShell("command -v codex 2>/dev/null && codex --version 2>/dev/null || echo ''")
             val termuxVer = try {
                 context.packageManager.getPackageInfo(TERMUX_PACKAGE, 0).versionName ?: ""
-            } catch (_: Exception) { "" }
+            } catch (e: Exception) {
+                Log.w(TAG, "获取 Termux 版本失败: ${e.message}")
+                ""
+            }
 
             val hasNode = nodeVer.isNotBlank()
             val hasPython = pyVer.isNotBlank()
@@ -338,7 +342,10 @@ class DevelopmentEnvironment(private val context: Context) {
                 process.waitFor()
                 output
             }
-        } catch (e: Exception) { "" }
+        } catch (e: Exception) {
+            Log.w(TAG, "外部 shell 命令执行失败: $command", e)
+            ""
+        }
     }
 
     /**
@@ -352,7 +359,10 @@ class DevelopmentEnvironment(private val context: Context) {
                 val exitCode = process.waitFor()
                 Pair(exitCode, output)
             }
-        } catch (e: Exception) { Pair(-1, e.message ?: "unknown") }
+        } catch (e: Exception) {
+            Log.w(TAG, "同步 shell 命令执行失败: $command", e)
+            Pair(-1, e.message ?: "unknown")
+        }
     }
 
     /**
@@ -365,7 +375,10 @@ class DevelopmentEnvironment(private val context: Context) {
                 file.readLines().firstOrNull { it.startsWith("PRETTY_NAME=") }
                     ?.removePrefix("PRETTY_NAME=")?.trim('"') ?: "Ubuntu"
             } else ""
-        } catch (_: Exception) { "" }
+        } catch (e: Exception) {
+            Log.w(TAG, "读取 Ubuntu os-release 失败: ${e.message}")
+            ""
+        }
     }
 
     /**

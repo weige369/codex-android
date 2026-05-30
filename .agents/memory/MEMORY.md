@@ -1,2 +1,3 @@
 - [Web-chat interface themes](web-chat-themes.md) — selectable local themes layer over server theme via TS preset merge + data-theme CSS; inline vars beat stylesheets.
 - [Web-chat first-screen perf](web-chat-first-screen-perf.md) — first-screen cost is measured by static analysis of dist (not a browser); regenerate baseline after intentional changes.
+- [Security level tiers](security-level-tiers.md) — 安全/标准/完全 switch; keep tiers monotonic (no file-sandbox claim at a tier that allows shell); gate both AnyclawManager + CodexMCPBridge tool paths.

@@ -66,6 +66,12 @@ fun CodexSettingsScreen(
     ) }
     var showApiKey by remember { mutableStateOf(false) }
 
+    // Security level
+    var securityLevel by remember { mutableStateOf(
+        context.getSharedPreferences("codex_prefs", Context.MODE_PRIVATE)
+            .getString("security_level", "standard") ?: "standard"
+    ) }
+
     // Binary status
     val isInstalled = codexManager.isInstalled()
     val binarySize = if (isInstalled) {
@@ -183,6 +189,49 @@ fun CodexSettingsScreen(
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password)
                             )
                         }
+                    }
+                }
+            }
+
+            // ===== Security Level =====
+            item {
+                SectionHeader("安全等级")
+            }
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant
+                    )
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text(
+                            "控制 AI 工具的权限范围（Shell 执行、文件读写）。",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(bottom = 8.dp, start = 4.dp)
+                        )
+                        ConnModeOption(
+                            title = "安全",
+                            subtitle = "禁用 Shell 工具，文件读写仅限工作目录",
+                            icon = Icons.Default.Shield,
+                            selected = securityLevel == "safe",
+                            onClick = { securityLevel = "safe"; savePref(context, "security_level", "safe") }
+                        )
+                        ConnModeOption(
+                            title = "标准 (推荐)",
+                            subtitle = "禁用 Shell 工具，可读写全盘文件",
+                            icon = Icons.Default.Security,
+                            selected = securityLevel == "standard",
+                            onClick = { securityLevel = "standard"; savePref(context, "security_level", "standard") }
+                        )
+                        ConnModeOption(
+                            title = "完全",
+                            subtitle = "无限制：可执行任意 Shell + 全盘文件访问",
+                            icon = Icons.Default.LockOpen,
+                            selected = securityLevel == "full",
+                            onClick = { securityLevel = "full"; savePref(context, "security_level", "full") }
+                        )
                     }
                 }
             }

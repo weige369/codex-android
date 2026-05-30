@@ -512,6 +512,9 @@ class AnyclawManager(private val context: Context) {
     }
 
     private suspend fun executeAndroidShell(tool: String, args: Map<String, String>): String {
+        if (tool == "shell" && !com.codex.android.security.SecurityPolicy.isShellAllowed(context)) {
+            return com.codex.android.security.SecurityPolicy.shellDeniedResponse(context)
+        }
         return try {
             val command = when (tool) {
                 "shell" -> args["command"] ?: "echo 'no command'"
@@ -544,6 +547,7 @@ class AnyclawManager(private val context: Context) {
             when (tool) {
                 "read_file" -> {
                     val path = args["path"] ?: return "{\"success\":false,\"error\":\"path required\"}"
+                    com.codex.android.security.SecurityPolicy.checkFileAccess(context, path)?.let { return it }
                     val content = File(path).readText()
                     JSONObject().apply {
                         put("success", true)
@@ -553,12 +557,14 @@ class AnyclawManager(private val context: Context) {
                 }
                 "write_file" -> {
                     val path = args["path"] ?: return "{\"success\":false,\"error\":\"path required\"}"
+                    com.codex.android.security.SecurityPolicy.checkFileAccess(context, path)?.let { return it }
                     val content = args["content"] ?: ""
                     File(path).writeText(content)
                     "{\"success\":true,\"path\":\"$path\",\"size\":${content.length}}"
                 }
                 "list_dir" -> {
                     val path = args["path"] ?: return "{\"success\":false,\"error\":\"path required\"}"
+                    com.codex.android.security.SecurityPolicy.checkFileAccess(context, path)?.let { return it }
                     val dir = File(path)
                     if (!dir.isDirectory) return "{\"success\":false,\"error\":\"not a directory: $path\"}"
                     val files = dir.listFiles()?.map { f ->

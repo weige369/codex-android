@@ -141,10 +141,14 @@ class CodexMCPBridge(private val context: Context) {
             when (toolName) {
                 "android_read_file" -> {
                     val path = args["path"] ?: return "{\"error\":\"path required\"}"
+                    com.codex.android.security.SecurityPolicy.checkFileAccess(context, path)?.let { return it }
                     val content = File(path).readText()
                     "{\"success\":true,\"content\":\"${content.replace("\"", "\\\"").take(10000)}\"}"
                 }
                 "android_shell" -> {
+                    if (!com.codex.android.security.SecurityPolicy.isShellAllowed(context)) {
+                        return com.codex.android.security.SecurityPolicy.shellDeniedResponse(context)
+                    }
                     val command = args["command"] ?: return "{\"error\":\"command required\"}"
                     val process = Runtime.getRuntime().exec(arrayOf("/system/bin/sh", "-c", command))
                     val output = process.inputStream.bufferedReader().readText()

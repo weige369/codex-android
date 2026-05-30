@@ -16,8 +16,15 @@
 // Usage:
 //   node scripts/measure-first-screen-browser.mjs                 # measure + compare to browser baseline
 //   node scripts/measure-first-screen-browser.mjs --update-baseline  # (re)write the browser baseline + report
+//   node scripts/measure-first-screen-browser.mjs --check         # exit 1 if on-device TTI/TBT regressed
 //   node scripts/measure-first-screen-browser.mjs --json          # print machine-readable JSON only
 //   node scripts/measure-first-screen-browser.mjs --iterations=5  # samples per profile (default 3)
+//
+// --check is the on-device counterpart of the static `measure --check` byte
+// gate: it re-measures and fails (exit 1) when "ready to use" (TTI) or
+// main-thread blocking (TBT) regress past tolerance vs the saved browser
+// baseline. Where no Chromium / puppeteer-core is available it SKIPS (exit 0)
+// instead of hard-failing, so environments without a browser don't get blocked.
 //
 // Environment:
 //   CHROMIUM_BIN / PUPPETEER_EXECUTABLE_PATH   override the Chromium executable
@@ -38,9 +45,19 @@ const reportPath = resolve(projectRoot, 'perf', 'first-screen-browser-report.md'
 
 const args = new Set(process.argv.slice(2));
 const updateBaseline = args.has('--update-baseline');
+const checkMode = args.has('--check');
 const jsonOnly = args.has('--json');
 const iterationsArg = [...args].find((a) => a.startsWith('--iterations='));
 const ITERATIONS = Math.max(1, Number(iterationsArg?.split('=')[1]) || 3);
+
+// Regression tolerances for the --check gate. On-device timings are noisier than
+// byte sizes (CPU throttling + sampling jitter), so each metric allows the
+// larger of a percentage of the baseline OR an absolute millisecond floor, so
+// small absolute numbers aren't tripped by ordinary run-to-run noise.
+const TTI_TOLERANCE = 0.2; // 20% slower "ready to use" fails --check
+const TTI_MIN_SLACK_MS = 150;
+const TBT_TOLERANCE = 0.3; // 30% more main-thread blocking fails --check
+const TBT_MIN_SLACK_MS = 50;
 
 // Profiles combine a network shape (kept in sync with the static script's
 // NETWORK_PROFILES via `staticProfile`) with a CPU throttle representing the
@@ -80,6 +97,17 @@ const SETTLE_MS = 3_000;
 function fail(message) {
   console.error(`\n[measure-first-screen-browser] ${message}\n`);
   process.exit(1);
+}
+
+// In --check mode a missing browser must not block the build: there is simply
+// nothing to measure, so skip cleanly (exit 0). Outside --check it stays a hard
+// failure so the manual measure/baseline commands tell you what's wrong.
+function skipOrFail(message) {
+  if (checkMode) {
+    console.error(`\n[measure-first-screen-browser] SKIP (--check): ${message}\n`);
+    process.exit(0);
+  }
+  fail(message);
 }
 
 function resolveChromium() {
@@ -341,7 +369,7 @@ async function main() {
 
   const executablePath = resolveChromium();
   if (!executablePath) {
-    fail(
+    skipOrFail(
       'No Chromium/Chrome executable found. Install one (e.g. the `chromium` system package) ' +
         'or set CHROMIUM_BIN. The lightweight `npm run measure` script needs no browser.'
     );
@@ -351,7 +379,7 @@ async function main() {
   try {
     puppeteer = (await import('puppeteer-core')).default;
   } catch {
-    fail(
+    skipOrFail(
       'puppeteer-core is not installed. Install it (root devDependency) to run the browser ' +
         'measurement. The lightweight `npm run measure` script does not need it.'
     );
@@ -395,6 +423,11 @@ async function main() {
     writeReportMarkdown(result);
     console.log(`\n✔ Browser baseline updated: ${baselinePath}`);
     console.log(`✔ Report written:          ${reportPath}`);
+    process.exit(0);
+  }
+
+  if (checkMode) {
+    checkAgainstBaseline(result);
     process.exit(0);
   }
 
@@ -494,6 +527,67 @@ function writeReportMarkdown(result) {
   }
   lines.push('');
   writeFileSync(reportPath, lines.join('\n'));
+}
+
+// The --check gate: re-measured TTI/TBT must stay within tolerance of the saved
+// browser baseline, or exit non-zero so a slow-to-interact regression is caught
+// even when the download size stayed flat.
+function checkAgainstBaseline(result) {
+  const baseline = loadJson(baselinePath);
+  if (!baseline) {
+    console.log(
+      '\nNo browser baseline saved yet — nothing to check against. ' +
+        'Run `npm run measure:browser:baseline` to record one. Skipping (--check).'
+    );
+    process.exit(0);
+  }
+
+  console.log('\n=== On-device regression check vs browser baseline ===');
+  console.log(`baseline measured: ${baseline.measuredAt}`);
+  console.log(
+    `tolerances: TTI +${(TTI_TOLERANCE * 100).toFixed(0)}% (min +${TTI_MIN_SLACK_MS} ms), ` +
+      `TBT +${(TBT_TOLERANCE * 100).toFixed(0)}% (min +${TBT_MIN_SLACK_MS} ms)`
+  );
+
+  const regressions = [];
+  const evalMetric = (label, profileName, cur, base, tol, minSlack) => {
+    if (cur == null || base == null) {
+      console.log(
+        `  ${pad(profileName, 34)} ${label}: ` +
+          `${cur == null ? 'n/a (not measured)' : `${ms(cur)} (no baseline)`}`
+      );
+      return;
+    }
+    const budget = Math.max(base * tol, minSlack);
+    const d = cur - base;
+    const over = d > budget;
+    if (over) {
+      regressions.push(
+        `${profileName} — ${label} ${ms(base)} -> ${ms(cur)} (+${d} ms, budget +${Math.round(budget)} ms)`
+      );
+    }
+    console.log(
+      `  ${pad(profileName, 34)} ${label}: ${ms(base)} -> ${ms(cur)} ` +
+        `(${d >= 0 ? '+' : ''}${d} ms, budget +${Math.round(budget)} ms) ${over ? 'FAIL' : 'ok'}`
+    );
+  };
+
+  for (const p of result.profiles) {
+    const base = baseline.profiles?.find((b) => b.profile === p.profile);
+    evalMetric('TTI', p.profile, p.metrics.timeToInteractiveMs, base?.metrics?.timeToInteractiveMs, TTI_TOLERANCE, TTI_MIN_SLACK_MS);
+    evalMetric('TBT', p.profile, p.metrics.totalBlockingTimeMs, base?.metrics?.totalBlockingTimeMs, TBT_TOLERANCE, TBT_MIN_SLACK_MS);
+  }
+
+  if (regressions.length) {
+    fail(
+      'On-device first-screen timings regressed beyond tolerance:\n' +
+        regressions.map((r) => `  - ${r}`).join('\n') +
+        '\n\nIf this slowdown is intentional, refresh the browser baseline with ' +
+        '`npm --prefix web-chat run measure:browser:baseline` and commit the updated ' +
+        'perf/first-screen-browser-baseline.json.'
+    );
+  }
+  console.log('\n✔ On-device first-screen timings within tolerance.\n');
 }
 
 function compareToBaseline(result) {

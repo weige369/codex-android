@@ -250,6 +250,24 @@ npm --prefix web-chat run measure:baseline
 
 `measure:baseline` 会重写 `web-chat/perf/first-screen-baseline.json` 与 `web-chat/perf/first-screen-report.md`，之后 `measure:check` 便会以新的体积为基准进行比较。
 
+**首屏“好不好用”回归检查（真机时延，可选）：** 上面的 `measure:check` 只拦截首屏下载**体积**回归，但即使体积不变，改动也可能让连接遮罩在手机上变得更慢才能交互（例如首屏前同步执行的 JS 变多）。`measure:browser:check` 用无头 Chromium（手机级 CPU + 网络限速）实测“可交互时间”（TTI）与主线程阻塞时间（TBT），并与 `web-chat/perf/first-screen-browser-baseline.json` 中的基线对比：
+
+```bash
+npm --prefix web-chat run build          # 先构建，保证 dist 为最新
+npm --prefix web-chat run measure:browser:check
+```
+
+容差为 TTI 超基线 20%（且至少 +150 ms）、TBT 超基线 30%（且至少 +50 ms）时判为回归并以非零退出码失败；时延天然比体积抖动大，因此用“百分比与绝对毫秒取较大值”的容差避免误报。**在没有 Chromium / 未安装 `puppeteer-core` 的环境中，该检查会直接跳过（exit 0）而非报错**，所以不会卡住没有浏览器的环境。
+
+如果某次时延变慢是预期内的（例如有意引入的新功能），请在 `web-chat` 构建之后刷新真机基线，并把更新后的基线文件一并提交：
+
+```bash
+npm --prefix web-chat run build              # 先构建，保证 dist 为最新
+npm --prefix web-chat run measure:browser:baseline
+```
+
+`measure:browser:baseline` 会重写 `web-chat/perf/first-screen-browser-baseline.json` 与 `web-chat/perf/first-screen-browser-report.md`，之后 `measure:browser:check` 便会以新的时延为基准进行比较。
+
 7. **打包 ToolPkg 并同步示例包到应用 assets (关键步骤！):**
 ```bash
 python3 ./sync_example_packages.py

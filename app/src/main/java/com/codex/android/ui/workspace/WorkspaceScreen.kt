@@ -89,7 +89,21 @@ fun WorkspaceScreen(
         ) {
             AndroidView(
                 factory = { ctx ->
-                    WebView(ctx).apply {
+                    // WebView 必须在主线程创建（需要 Looper）
+                    val webView = if (android.os.Looper.myLooper() == null) {
+                        // 如果不在主线程，通过 CountDownLatch 同步等待主线程创建
+                        val latch = java.util.concurrent.CountDownLatch(1)
+                        val holder = arrayOf<WebView?>(null)
+                        android.os.Handler(android.os.Looper.getMainLooper()).post {
+                            try { holder[0] = WebView(ctx) } catch (_: Exception) {}
+                            latch.countDown()
+                        }
+                        latch.await(5, java.util.concurrent.TimeUnit.SECONDS)
+                        holder[0] ?: WebView(ctx)
+                    } else {
+                        WebView(ctx)
+                    }
+                    webView.apply {
                         settings.javaScriptEnabled = true
                         settings.domStorageEnabled = true
                         settings.allowFileAccess = true

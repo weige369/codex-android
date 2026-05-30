@@ -253,9 +253,24 @@ class DiagnosticsRunner(private val context: Context) {
 
         // WebView 可用性
         try {
-            val wv = WebView(context)
-            wv.destroy()
-            results.add(TestResult("WebView 创建", true, "正常"))
+            // 使用 CountDownLatch 在主线程创建 WebView
+            val latch = java.util.concurrent.CountDownLatch(1)
+            val holder = arrayOf<Exception?>(null)
+            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                try {
+                    val wv = android.webkit.WebView(context)
+                    wv.destroy()
+                } catch (e: Exception) {
+                    holder[0] = e
+                }
+                latch.countDown()
+            }
+            latch.await(5, java.util.concurrent.TimeUnit.SECONDS)
+            val error = holder[0]
+            results.add(TestResult("WebView 创建", error == null,
+                if (error == null) "正常" else "失败: ${error.message}",
+                severity = if (error == null) Severity.INFO else Severity.ERROR
+            ))
         } catch (e: Exception) {
             results.add(TestResult("WebView 创建", false, "失败: ${e.message}", Severity.ERROR))
         }
@@ -295,7 +310,8 @@ class DiagnosticsRunner(private val context: Context) {
         val configDir = File(context.filesDir, ".codex")
 
         // 目录创建
-        val dirsOk = codexDir.mkdirs() && workspaceDir.mkdirs() && configDir.mkdirs()
+        codexDir.mkdirs(); workspaceDir.mkdirs(); configDir.mkdirs()
+        val dirsOk = codexDir.exists() && workspaceDir.exists() && configDir.exists()
         results.add(TestResult(
             "文件目录访问", dirsOk,
             "codex: ${codexDir.exists()} | workspace: ${workspaceDir.exists()} | .codex: ${configDir.exists()}",

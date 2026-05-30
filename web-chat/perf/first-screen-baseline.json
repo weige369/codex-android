@@ -1,0 +1,116 @@
+{
+  "measuredAt": "2026-05-30T10:38:26.609Z",
+  "buildId": "index-a-Wv-Oiu.js",
+  "firstScreen": {
+    "js": [
+      {
+        "name": "react-DYrC2osf.js",
+        "sizes": {
+          "raw": 192811,
+          "gzip": 59977,
+          "brotli": 51736
+        }
+      },
+      {
+        "name": "index-a-Wv-Oiu.js",
+        "sizes": {
+          "raw": 185873,
+          "gzip": 47924,
+          "brotli": 40031
+        }
+      },
+      {
+        "name": "glass-OIadho3n.js",
+        "sizes": {
+          "raw": 52993,
+          "gzip": 32910,
+          "brotli": 31639
+        }
+      }
+    ],
+    "css": {
+      "name": "index-CDuGIP0A.css",
+      "sizes": {
+        "raw": 122998,
+        "gzip": 18188,
+        "brotli": 15407
+      }
+    },
+    "jsTotal": {
+      "raw": 431677,
+      "gzip": 140811,
+      "brotli": 123406
+    },
+    "criticalTotal": {
+      "raw": 554675,
+      "gzip": 158999,
+      "brotli": 138813
+    }
+  },
+  "deferred": {
+    "js": [
+      {
+        "name": "markdown-BhHLQLhe.js",
+        "sizes": {
+          "raw": 149736,
+          "gzip": 44234,
+          "brotli": 39021
+        }
+      },
+      {
+        "name": "CodexVersionManager-D3-Wnxh3.js",
+        "sizes": {
+          "raw": 12063,
+          "gzip": 4554,
+          "brotli": 3885
+        }
+      },
+      {
+        "name": "vendor-BEF86llw.js",
+        "sizes": {
+          "raw": 6943,
+          "gzip": 3035,
+          "brotli": 2777
+        }
+      },
+      {
+        "name": "AgentActivityPanel-DuqgDv1N.js",
+        "sizes": {
+          "raw": 4980,
+          "gzip": 1861,
+          "brotli": 1610
+        }
+      },
+      {
+        "name": "MarkdownRendererImpl-BigtxyFQ.js",
+        "sizes": {
+          "raw": 3105,
+          "gzip": 1106,
+          "brotli": 950
+        }
+      }
+    ],
+    "jsTotal": {
+      "raw": 176827,
+      "gzip": 54790,
+      "brotli": 48243
+    }
+  },
+  "network": [
+    {
+      "profile": "LAN Wi-Fi (phone↔PC)",
+      "estGzipMs": 20,
+      "estBrotliMs": 18
+    },
+    {
+      "profile": "Fast 3G / Slow 4G",
+      "estGzipMs": 450,
+      "estBrotliMs": 409
+    },
+    {
+      "profile": "Slow 3G",
+      "estGzipMs": 1600,
+      "estBrotliMs": 1435
+    }
+  ]
+}

@@ -1,1 +1,2 @@
 - [Web-chat interface themes](web-chat-themes.md) — selectable local themes layer over server theme via TS preset merge + data-theme CSS; inline vars beat stylesheets.
+- [Web-chat first-screen perf](web-chat-first-screen-perf.md) — first-screen cost is measured by static analysis of dist (not a browser); regenerate baseline after intentional changes.

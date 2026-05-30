@@ -153,7 +153,10 @@ class DiagnosticsRunner(private val context: Context) {
         for ((name, perm) in permissions) {
             val granted = try {
                 context.checkSelfPermission(perm) == android.content.pm.PackageManager.PERMISSION_GRANTED
-            } catch (e: Exception) { false }
+            } catch (e: Exception) {
+                Log.w(TAG, "权限检查失败: $name", e)
+                false
+            }
             results.add(TestResult(
                 "权限: $name", granted,
                 if (granted) "已授予" else "未授予",
@@ -166,7 +169,10 @@ class DiagnosticsRunner(private val context: Context) {
         val hasShizuku = try {
             Class.forName("moe.shizuku.api.ShizukuApi")
             true
-        } catch (_: Exception) { false }
+        } catch (e: Exception) {
+            Log.w(TAG, "Shizuku API 类存在性检查失败", e)
+            false
+        }
         results.add(TestResult(
             "Shizuku API", hasShizuku,
             if (hasShizuku) "可用" else "未安装",
@@ -252,7 +258,10 @@ class DiagnosticsRunner(private val context: Context) {
         // WebView 版本
         val wvVersion = try {
             WebView.getCurrentWebViewPackage()?.versionName ?: "未知"
-        } catch (e: Exception) { "未知" }
+        } catch (e: Exception) {
+            Log.w(TAG, "WebView 版本检测失败", e)
+            "未知"
+        }
         results.add(TestResult(
             "WebView 版本", true, wvVersion
         ))
@@ -285,7 +294,10 @@ class DiagnosticsRunner(private val context: Context) {
         val htmlExists = File(context.filesDir.parentFile?.parentFile, "app/src/main/assets/web/codex-ui.html")
             .exists() || try {
             context.assets.open("web/codex-ui.html").use { true }
-        } catch (e: Exception) { false }
+        } catch (e: Exception) {
+            Log.w(TAG, "Codex UI HTML 资源检查失败", e)
+            false
+        }
         results.add(TestResult(
             "Codex UI HTML 资源", htmlExists,
             if (htmlExists) "存在" else "缺失",
@@ -297,7 +309,10 @@ class DiagnosticsRunner(private val context: Context) {
         val bridgeAvailable = try {
             Class.forName("com.codex.android.bridge.CodexBridge")
             true
-        } catch (e: Exception) { false }
+        } catch (e: Exception) {
+            Log.w(TAG, "CodexBridge 类存在性检查失败", e)
+            false
+        }
         results.add(TestResult(
             "CodexBridge 类", bridgeAvailable,
             if (bridgeAvailable) "正常" else "缺失",
@@ -331,7 +346,10 @@ class DiagnosticsRunner(private val context: Context) {
             val readBack = testFile.readText()
             testFile.delete()
             readBack == "ok"
-        } catch (e: Exception) { false }
+        } catch (e: Exception) {
+            Log.e(TAG, "文件写入测试失败", e)
+            false
+        }
         results.add(TestResult(
             "文件写入权限", writeOk,
             if (writeOk) "正常" else "写入失败",

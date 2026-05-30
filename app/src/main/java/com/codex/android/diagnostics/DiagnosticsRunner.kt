@@ -377,27 +377,39 @@ class DiagnosticsRunner(private val context: Context) {
             ))
         }
 
-        // 下载源可达性（遍历所有镜像）
+        // 下载源可达性（逐个检测每个镜像并分别列出状态）
         var anyMirrorReachable = false
-        var lastReachableUrl = ""
         for (mirrorUrl in CodexManager.getAllDownloadUrls()) {
+            val host = try { java.net.URL(mirrorUrl).host } catch (_: Exception) { mirrorUrl }
+            var reachable = false
+            var statusDetail: String
             try {
                 val url = java.net.URL(mirrorUrl)
                 val conn = url.openConnection() as java.net.HttpURLConnection
-                conn.connectTimeout = 5000
+                conn.connectTimeout = 4000
+                conn.readTimeout = 4000
+                conn.instanceFollowRedirects = true
+                conn.requestMethod = "HEAD"
                 conn.setRequestProperty("User-Agent", "Codex-Android/1.0")
-                if (conn.responseCode in 200..399) {
-                    anyMirrorReachable = true
-                    lastReachableUrl = mirrorUrl
-                    break
-                }
-            } catch (_: Exception) { }
+                val code = conn.responseCode
+                reachable = code in 200..399
+                statusDetail = if (reachable) "可达 (HTTP $code)" else "不可用 (HTTP $code)"
+                conn.disconnect()
+            } catch (e: Exception) {
+                statusDetail = "连接失败 (${e.javaClass.simpleName})"
+            }
+            if (reachable) anyMirrorReachable = true
+            results.add(TestResult(
+                "下载镜像: $host", reachable,
+                statusDetail,
+                severity = if (reachable) Severity.INFO else Severity.WARNING
+            ))
         }
         results.add(TestResult(
-            "Codex 下载源可达", anyMirrorReachable,
-            if (anyMirrorReachable) "镜像可达: $lastReachableUrl" else "连接失败（所有镜像不可达）",
+            "Codex 下载源汇总", anyMirrorReachable,
+            if (anyMirrorReachable) "至少一个镜像可达" else "所有镜像均不可达",
             severity = if (anyMirrorReachable) Severity.INFO else Severity.WARNING,
-            suggestion = if (!anyMirrorReachable) "请检查网络连接，或手动导入 Codex 二进制" else ""
+            suggestion = if (!anyMirrorReachable) "请检查网络连接，或在设置中手动导入 Codex 二进制" else ""
         ))
 
         return results
@@ -408,13 +420,13 @@ class DiagnosticsRunner(private val context: Context) {
         val results = mutableListOf<TestResult>()
         val devEnv = DevelopmentEnvironment(context)
 
-        // Termux 检测
+        // Termux 检测（运行 Codex 必需）
         val hasTermux = devEnv.detectTermux()
         results.add(TestResult(
-            "Termux", hasTermux,
-            if (hasTermux) "已安装 (可选)" else "未安装 (自包含模式)",
-            severity = Severity.INFO,
-            suggestion = if (!hasTermux) "可选安装 Termux 获得完整 Linux 环境" else ""
+            "Termux (运行 Codex 必需)", hasTermux,
+            if (hasTermux) "已安装" else "未安装（受限模式，无法运行 Codex）",
+            severity = if (hasTermux) Severity.INFO else Severity.WARNING,
+            suggestion = if (!hasTermux) "请从 F-Droid 安装 Termux + Ubuntu 后才能运行 Codex" else ""
         ))
 
         if (hasTermux) {

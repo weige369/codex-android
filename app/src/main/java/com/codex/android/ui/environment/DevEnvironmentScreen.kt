@@ -2,9 +2,13 @@ package com.codex.android.ui.environment
 
 import android.content.Intent
 import android.net.Uri
+import android.widget.Toast
 import androidx.compose.animation.*
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -13,9 +17,12 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -282,21 +289,38 @@ private fun EnvironmentStatusCard(
                 Text("环境检测失败", color = MaterialTheme.colorScheme.error)
             } else {
                 // 状态图标和文字
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(verticalAlignment = Alignment.Top) {
                     val (icon, color, text) = when (envInfo.state) {
-                        DevelopmentEnvironment.EnvState.UBUNTU_READY -> 
-                            Triple(Icons.Default.CheckCircle, Color(0xFF2ED573), "Ubuntu 已安装")
-                        DevelopmentEnvironment.EnvState.TERMUX_READY -> 
-                            Triple(Icons.Default.Info, Color(0xFFFFA502), "Termux 已安装")
-                        DevelopmentEnvironment.EnvState.SELF_CONTAINED -> 
-                            Triple(Icons.Default.CheckCircle, Color(0xFF2ED573), "自包含模式")
-                        DevelopmentEnvironment.EnvState.ERROR -> 
+                        DevelopmentEnvironment.EnvState.UBUNTU_READY ->
+                            Triple(Icons.Default.CheckCircle, Color(0xFF2ED573), "Ubuntu 已安装（可运行 Codex）")
+                        DevelopmentEnvironment.EnvState.TERMUX_READY ->
+                            Triple(Icons.Default.CheckCircle, Color(0xFF2ED573), "Termux 已安装（可运行 Codex）")
+                        DevelopmentEnvironment.EnvState.SELF_CONTAINED ->
+                            Triple(Icons.Default.Warning, Color(0xFFFFA502), "⚠️ 受限模式（无法运行 Codex）")
+                        DevelopmentEnvironment.EnvState.ERROR ->
                             Triple(Icons.Default.Error, Color(0xFFFF4757), "环境异常")
+                    }
+                    val description = when (envInfo.state) {
+                        DevelopmentEnvironment.EnvState.SELF_CONTAINED ->
+                            "未检测到 Termux。Codex 为 Linux 二进制，Android 无法直接运行，" +
+                                "需安装 Termux + Ubuntu 后才能真正启动 Codex。"
+                        DevelopmentEnvironment.EnvState.TERMUX_READY ->
+                            "建议继续安装 Ubuntu 以获得完整开发环境。"
+                        else -> ""
                     }
                     Icon(icon, null, tint = color, modifier = Modifier.size(24.dp))
                     Spacer(Modifier.width(12.dp))
                     Column {
                         Text(text, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+                        if (description.isNotBlank()) {
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                description,
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                lineHeight = 18.sp
+                            )
+                        }
                         if (envInfo.errorMessage.isNotBlank()) {
                             Text(envInfo.errorMessage, fontSize = 12.sp, color = MaterialTheme.colorScheme.error)
                         }
@@ -310,6 +334,22 @@ private fun EnvironmentStatusCard(
 // ===== Termux 安装引导 =====
 @Composable
 private fun TermuxSetupCard(onInstallTermux: () -> Unit) {
+    val context = LocalContext.current
+    val clipboard = LocalClipboardManager.current
+
+    fun openUrl(url: String) {
+        try {
+            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+        } catch (_: Exception) {
+            Toast.makeText(context, "无法打开链接", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    fun copy(text: String) {
+        clipboard.setText(AnnotatedString(text))
+        Toast.makeText(context, "已复制: $text", Toast.LENGTH_SHORT).show()
+    }
+
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
@@ -317,21 +357,166 @@ private fun TermuxSetupCard(onInstallTermux: () -> Unit) {
         )
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
-            Text("需要安装 Termux", fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
-            Spacer(Modifier.height(8.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    Icons.Default.Warning,
+                    null,
+                    tint = Color(0xFFFFA502),
+                    modifier = Modifier.size(20.dp)
+                )
+                Spacer(Modifier.width(8.dp))
+                Text("需要安装 Termux 才能运行 Codex", fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+            }
+            Spacer(Modifier.height(6.dp))
             Text(
-                "Codex Android 需要 Termux 提供 Linux 运行环境。" +
-                "请从 F-Droid 安装 Termux，然后返回此页面刷新。",
+                "Codex 为 Linux 二进制，Android 无法直接运行，必须借助 Termux 提供的 Linux 环境。" +
+                "请按以下三步完成安装：",
                 fontSize = 13.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 lineHeight = 20.sp
             )
-            Spacer(Modifier.height(12.dp))
-            Button(onClick = onInstallTermux, modifier = Modifier.fillMaxWidth()) {
-                Icon(Icons.Default.OpenInNew, null, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.width(8.dp))
-                Text("打开 F-Droid Termux 页面")
+            Spacer(Modifier.height(16.dp))
+
+            // 步骤 1：安装 Termux
+            SetupStep(stepNumber = 1, title = "安装 Termux") {
+                Text(
+                    "推荐从 F-Droid 安装（Google Play 版本已停止维护）。",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    lineHeight = 18.sp
+                )
+                Spacer(Modifier.height(8.dp))
+                Button(
+                    onClick = onInstallTermux,
+                    modifier = Modifier.fillMaxWidth(),
+                    contentPadding = PaddingValues(vertical = 8.dp)
+                ) {
+                    Icon(Icons.Default.OpenInNew, null, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("打开 F-Droid Termux 页面", fontSize = 13.sp)
+                }
+                Spacer(Modifier.height(6.dp))
+                OutlinedButton(
+                    onClick = { openUrl("https://mirrors.tuna.tsinghua.edu.cn/fdroid/repo/com.termux_1020.apk") },
+                    modifier = Modifier.fillMaxWidth(),
+                    contentPadding = PaddingValues(vertical = 8.dp)
+                ) {
+                    Icon(Icons.Default.Download, null, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("清华大学镜像（国内更快）", fontSize = 13.sp)
+                }
             }
+
+            Spacer(Modifier.height(12.dp))
+
+            // 步骤 2：在 Termux 中执行命令
+            SetupStep(stepNumber = 2, title = "在 Termux 中执行命令") {
+                Text(
+                    "打开 Termux，逐条粘贴并执行下列命令（点右侧按钮可复制）：",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    lineHeight = 18.sp
+                )
+                Spacer(Modifier.height(8.dp))
+                CopyableCommand("pkg upgrade -y", onCopy = ::copy)
+                Spacer(Modifier.height(6.dp))
+                CopyableCommand("pkg install proot-distro -y", onCopy = ::copy)
+                Spacer(Modifier.height(6.dp))
+                CopyableCommand("proot-distro install ubuntu", onCopy = ::copy)
+                Spacer(Modifier.height(6.dp))
+                CopyableCommand("pkg install nodejs-lts python git -y", onCopy = ::copy)
+            }
+
+            Spacer(Modifier.height(12.dp))
+
+            // 步骤 3：返回刷新
+            SetupStep(stepNumber = 3, title = "返回此页面刷新", isLast = true) {
+                Text(
+                    "命令执行完成后，回到本页面点击底部「刷新环境检测」，状态将变为「已安装」。",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    lineHeight = 18.sp
+                )
+            }
+        }
+    }
+}
+
+// ===== 安装步骤（带序号圆点和连接线） =====
+@Composable
+private fun SetupStep(
+    stepNumber: Int,
+    title: String,
+    isLast: Boolean = false,
+    content: @Composable () -> Unit
+) {
+    Row(modifier = Modifier.fillMaxWidth()) {
+        // 序号圆点 + 竖线
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Box(
+                modifier = Modifier
+                    .size(26.dp)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.primary),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    "$stepNumber",
+                    color = MaterialTheme.colorScheme.onPrimary,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 13.sp
+                )
+            }
+            if (!isLast) {
+                Box(
+                    modifier = Modifier
+                        .width(2.dp)
+                        .height(12.dp)
+                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.4f))
+                )
+            }
+        }
+        Spacer(Modifier.width(12.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(title, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+            Spacer(Modifier.height(4.dp))
+            content()
+        }
+    }
+}
+
+// ===== 可复制命令行 =====
+@Composable
+private fun CopyableCommand(command: String, onCopy: (String) -> Unit) {
+    Surface(
+        shape = RoundedCornerShape(8.dp),
+        color = Color(0xFF0A0A0F),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onCopy(command) }
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                command,
+                fontSize = 12.sp,
+                fontFamily = FontFamily.Monospace,
+                color = Color(0xFF4AF626),
+                modifier = Modifier.weight(1f)
+            )
+            Spacer(Modifier.width(8.dp))
+            Icon(
+                Icons.Default.ContentCopy,
+                contentDescription = "复制",
+                tint = Color(0xFF8888AA),
+                modifier = Modifier
+                    .size(28.dp)
+                    .clip(RoundedCornerShape(6.dp))
+                    .clickable { onCopy(command) }
+                    .padding(5.dp)
+            )
         }
     }
 }

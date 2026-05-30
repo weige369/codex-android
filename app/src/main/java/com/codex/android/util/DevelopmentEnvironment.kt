@@ -465,14 +465,14 @@ class DevelopmentEnvironment(private val context: Context) {
 ║      Codex Android 开发环境          ║
 ╚══════════════════════════════════════╝
 
-Codex Android 现在采用自包含模式运行：
-• 使用 Android 系统 shell 执行命令
-• Codex 二进制运行在 APP 内部目录
-• 零外部依赖
+⚠️ 受限模式（当前）：未检测到 Termux
+• Codex 二进制为 Linux musl 编译，Android 使用 bionic libc
+• 在没有 Termux 的情况下无法直接运行 Codex
+• 此模式仅可浏览界面，无法真正启动 Codex
 
-可选增强（推荐）：
-安装 Termux + Ubuntu 可获得完整开发环境：
-1. 从 F-Droid 安装 Termux
+必需步骤：安装 Termux + Ubuntu 才能运行 Codex
+1. 从 F-Droid 安装 Termux（推荐清华大学镜像）
+   https://mirrors.tuna.tsinghua.edu.cn/fdroid/repo/
 2. pkg upgrade -y && pkg install proot-distro
 3. proot-distro install ubuntu
 4. pkg install nodejs-lts python git
@@ -480,7 +480,7 @@ Codex Android 现在采用自包含模式运行：
 完成后你将获得：
 • Ubuntu 24.04 LTS 环境
 • Node.js / Python / Git
-• 完整的 Linux 开发体验
+• 可正常运行 Codex 的完整 Linux 环境
         """.trimIndent()
     }
 }

@@ -416,9 +416,10 @@ private fun ManualImportCard(
     codexManager: CodexManager,
     context: Context
 ) {
-    val scope = rememberCoroutineScope()
     var isImporting by remember { mutableStateOf(false) }
     var importStatus by remember { mutableStateOf<String?>(null) }
+    var importOk by remember { mutableStateOf(false) }
+    var helpExpanded by remember { mutableStateOf(false) }
 
     val importLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
@@ -434,20 +435,17 @@ private fun ManualImportCard(
                         input.copyTo(output)
                     }
                 }
-                val success = codexManager.importBinary(tempFile)
+                val result = codexManager.importBinaryChecked(tempFile)
                 tempFile.delete()
                 isImporting = false
-                if (success) {
-                    importStatus = "导入成功! (${codexManager.codexBinary.length() / 1024 / 1024}MB)"
-                    Toast.makeText(context, "Codex 二进制导入成功", Toast.LENGTH_SHORT).show()
-                } else {
-                    importStatus = "导入失败，文件可能无效"
-                    Toast.makeText(context, "导入失败，请检查文件", Toast.LENGTH_SHORT).show()
-                }
+                importOk = result.success
+                importStatus = result.message
+                Toast.makeText(context, result.message, Toast.LENGTH_LONG).show()
             } catch (e: Exception) {
                 isImporting = false
+                importOk = false
                 importStatus = "导入异常: ${e.message}"
-                Toast.makeText(context, "导入失败: ${e.message}", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, "导入失败: ${e.message}", Toast.LENGTH_LONG).show()
             }
         }
     }
@@ -464,6 +462,53 @@ private fun ManualImportCard(
                 fontSize = 13.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+
+            // 折叠的导入说明
+            Spacer(Modifier.height(8.dp))
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(8.dp))
+                    .clickable { helpExpanded = !helpExpanded }
+                    .padding(vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    Icons.Default.HelpOutline,
+                    null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    "导入说明（文件格式 / 路径 / 校验）",
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier.weight(1f)
+                )
+                Icon(
+                    if (helpExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                    null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+            if (helpExpanded) {
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    buildString {
+                        appendLine("• 文件类型：aarch64 Linux 的 codex 可执行文件（ELF 格式）")
+                        appendLine("• 不要直接选 .tar.gz 压缩包，请先解压取出其中的 codex 文件")
+                        appendLine("• 文件大小通常 > 10MB；过小说明下载不完整")
+                        appendLine("• 导入会校验 ELF 文件头，失败时会显示具体原因")
+                        append("• 导入后将存放到：filesDir/codex/codex 并自动赋予可执行权限")
+                    },
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    lineHeight = 18.sp
+                )
+            }
+
             Spacer(Modifier.height(8.dp))
 
             Row(
@@ -502,7 +547,11 @@ private fun ManualImportCard(
                 Text(
                     importStatus!!,
                     fontSize = 12.sp,
-                    color = if (importStatus!!.contains("成功")) StatusOnline else MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = when {
+                        isImporting -> MaterialTheme.colorScheme.onSurfaceVariant
+                        importOk -> StatusOnline
+                        else -> MaterialTheme.colorScheme.error
+                    },
                     fontWeight = FontWeight.Medium
                 )
             }

@@ -27,19 +27,34 @@ class CodexManager(private val context: Context) {
         private const val GITHUB_REPO = "openai/codex"
         private const val RELEASE_TAG = "rust-v$CODEX_VERSION"
         private const val BINARY_ARCHIVE = "codex-aarch64-unknown-linux-musl.tar.gz"
-        private const val GITHUB_DIRECT_URL =
-            "https://github.com/$GITHUB_REPO/releases/download/$RELEASE_TAG/$BINARY_ARCHIVE"
 
-        // 镜像下载源（GFW 友好）
+        // GitHub release 资源相对路径（github.com 之后的部分）
+        private const val RELEASE_PATH =
+            "$GITHUB_REPO/releases/download/$RELEASE_TAG/$BINARY_ARCHIVE"
+        private const val GITHUB_DIRECT_URL = "https://github.com/$RELEASE_PATH"
+        private const val GITHUB_FULL_URL = "https://github.com/$RELEASE_PATH"
+
+        // Gitee 镜像仓库（国内直连，需镜像同步对应 Release）
+        private const val GITEE_REPO = "mirrors/codex"
+        private const val GITEE_MIRROR_URL =
+            "https://gitee.com/$GITEE_REPO/releases/download/$RELEASE_TAG/$BINARY_ARCHIVE"
+
+        // 下载连接超时（毫秒）。缩短以便在不可达镜像间快速切换。
+        private const val CONNECT_TIMEOUT_MS = 8_000
+
+        // 镜像下载源（中国大陆友好，按可用性从高到低排列）
         private val MIRROR_URLS = listOf(
-            // 原始 GitHub（直连）
+            // 国内 GitHub 加速代理（中国大陆可达，优先尝试）
+            "https://ghfast.top/$GITHUB_FULL_URL",
+            "https://gh-proxy.com/$GITHUB_FULL_URL",
+            "https://ghproxy.net/$GITHUB_FULL_URL",
+            "https://mirror.ghproxy.com/$GITHUB_FULL_URL",
+            // Gitee Release 镜像（国内直连）
+            GITEE_MIRROR_URL,
+            // GitHub 直连（海外网络 / 已配置代理时可用）
             GITHUB_DIRECT_URL,
-            // ghproxy 镜像（国内可用）
-            "https://mirror.ghproxy.com/https://github.com/$GITHUB_REPO/releases/download/$RELEASE_TAG/$BINARY_ARCHIVE",
-            // GitHub fast 镜像
-            "https://githubfast.com/$GITHUB_REPO/releases/download/$RELEASE_TAG/$BINARY_ARCHIVE",
-            // 备用 GitHub release asset
-            "https://objects.githubusercontent.com/github-production-release-asset-2e65be/$BINARY_ARCHIVE",
+            // 旧版加速镜像（备用）
+            "https://githubfast.com/$RELEASE_PATH",
         )
 
         fun getAllDownloadUrls(): List<String> = MIRROR_URLS
@@ -65,12 +80,52 @@ class CodexManager(private val context: Context) {
      * 验证二进制文件完整性
      */
 
+    /** 手动导入结果，附带可展示给用户的具体原因 */
+    data class ImportResult(val success: Boolean, val message: String)
+
     /**
-     * 从本地文件导入 Codex 二进制
-     * 用于在网络不可用时手动导入
+     * 从本地文件导入 Codex 二进制（带完整性校验）。
+     * 校验文件头（ELF）、文件大小，并对常见错误（误选压缩包等）给出明确提示。
      */
-    fun importBinary(sourceFile: File): Boolean {
+    fun importBinaryChecked(sourceFile: File): ImportResult {
         return try {
+            if (!sourceFile.exists() || sourceFile.length() == 0L) {
+                return ImportResult(false, "文件不存在或为空")
+            }
+
+            val header = ByteArray(4)
+            FileInputStream(sourceFile).use { input ->
+                if (input.read(header) < 4) {
+                    return ImportResult(false, "文件过短，无法识别格式")
+                }
+            }
+
+            // gzip 魔数 1F 8B —— 用户多半误选了未解压的 .tar.gz
+            val isGzip = header[0] == 0x1F.toByte() && header[1] == 0x8B.toByte()
+            if (isGzip) {
+                return ImportResult(
+                    false,
+                    "这是压缩包(.tar.gz)。请先解压，导入其中名为 codex 的可执行文件"
+                )
+            }
+
+            // ELF 魔数 7F 45 4C 46
+            val isElf = header[0] == 0x7F.toByte() &&
+                header[1] == 0x45.toByte() &&
+                header[2] == 0x4C.toByte() &&
+                header[3] == 0x46.toByte()
+            if (!isElf) {
+                return ImportResult(false, "不是有效的 Linux ELF 可执行文件（文件头不匹配）")
+            }
+
+            if (sourceFile.length() < 10_000_000) {
+                val mb = sourceFile.length() / 1024 / 1024
+                return ImportResult(
+                    false,
+                    "文件过小（${mb}MB），Codex 二进制应大于 10MB，文件可能不完整"
+                )
+            }
+
             codexDir.mkdirs()
             sourceFile.inputStream().use { input ->
                 codexBinary.outputStream().use { output ->
@@ -78,13 +133,20 @@ class CodexManager(private val context: Context) {
                 }
             }
             codexBinary.setExecutable(true)
+            val sizeMb = codexBinary.length() / 1024 / 1024
             Log.i(TAG, "导入 Codex 二进制: ${codexBinary.length()} bytes")
-            true
+            ImportResult(true, "导入成功（${sizeMb}MB）")
         } catch (e: Exception) {
             Log.e(TAG, "导入失败", e)
-            false
+            ImportResult(false, "导入异常: ${e.message ?: "未知错误"}")
         }
     }
+
+    /**
+     * 从本地文件导入 Codex 二进制（向后兼容包装）。
+     * 用于在网络不可用时手动导入。
+     */
+    fun importBinary(sourceFile: File): Boolean = importBinaryChecked(sourceFile).success
 
     /**
      * 检查 Codex 二进制文件完整性
@@ -145,8 +207,9 @@ class CodexManager(private val context: Context) {
     ): Boolean {
         val url = URL(urlString)
         val connection = url.openConnection() as HttpURLConnection
-        connection.connectTimeout = 20_000
+        connection.connectTimeout = CONNECT_TIMEOUT_MS
         connection.readTimeout = 120_000
+        connection.instanceFollowRedirects = true
         connection.setRequestProperty("Accept", "application/octet-stream")
         connection.setRequestProperty("User-Agent", "Codex-Android/1.0")
 

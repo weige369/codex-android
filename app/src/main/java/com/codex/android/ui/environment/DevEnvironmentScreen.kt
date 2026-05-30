@@ -87,7 +87,7 @@ fun DevEnvironmentScreen(
             }
 
             // ===== Termux 安装引导 =====
-            if (false) {
+            if (envInfo?.state == DevelopmentEnvironment.EnvState.ERROR || envInfo?.state == DevelopmentEnvironment.EnvState.SELF_CONTAINED) {
                 item {
                     TermuxSetupCard(
                         onInstallTermux = {

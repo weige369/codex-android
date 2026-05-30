@@ -342,27 +342,23 @@ private fun WorkspaceTopBar(
             // Action buttons (always visible, but some only active when running)
             // GitHub button
             IconButton(
-                onClick = onOpenGitHub,
-                enabled = isRunning
+                onClick = onOpenGitHub
             ) {
                 Icon(
                     Icons.Outlined.Code,
                     contentDescription = "GitHub",
-                    tint = if (isRunning) MaterialTheme.colorScheme.onSurfaceVariant
-                           else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
 
             // MCP button
             IconButton(
-                onClick = onOpenMCP,
-                enabled = isRunning
+                onClick = onOpenMCP
             ) {
                 Icon(
                     Icons.Outlined.Memory,
                     contentDescription = "MCP",
-                    tint = if (isRunning) MaterialTheme.colorScheme.onSurfaceVariant
-                           else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
 
@@ -397,6 +393,11 @@ private fun WorkspaceTopBar(
                         text = { Text("文件浏览器", fontSize = 14.sp) },
                         onClick = { showMenu = false; onOpenFileBrowser?.invoke() },
                         leadingIcon = { Icon(Icons.Outlined.Folder, null, modifier = Modifier.size(18.dp)) }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("MCP 服务器", fontSize = 14.sp) },
+                        onClick = { showMenu = false; onOpenMCP() },
+                        leadingIcon = { Icon(Icons.Outlined.Memory, null, modifier = Modifier.size(18.dp)) }
                     )
                     DropdownMenuItem(
                         text = { Text("Skills 插件", fontSize = 14.sp) },

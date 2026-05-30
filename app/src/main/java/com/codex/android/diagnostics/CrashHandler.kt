@@ -165,25 +165,10 @@ class CrashHandler(private val context: Context) {
         val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
         val fileName = "logcat_$timestamp.txt"
 
-        // 获取 logcat 内容（过滤 Codex 相关标签）
+        // 获取 logcat 内容
         val logContent = try {
             val process = Runtime.getRuntime().exec(arrayOf(
-                "logcat", "-d",
-                "-t", lines.toString(),
-                "-s",
-                "CodexRuntimeService:V",
-                "CodexActivity:V",
-                "CodexBridge:V",
-                "CodexWebViewBridge:V",
-                "DevelopmentEnvironment:V",
-                "DiagnosticsRunner:V",
-                "CodexManager:V",
-                "CrashHandler:V",
-                "AnyclawManager:V",
-                "CodexMCPBridge:V",
-                "CodexApplication:V",
-                "chromium:V",
-                "AndroidRuntime:V"
+                "logcat", "-d", "-t", lines.toString()
             ))
             val reader = java.io.BufferedReader(java.io.InputStreamReader(process.inputStream))
             val text = reader.readText()

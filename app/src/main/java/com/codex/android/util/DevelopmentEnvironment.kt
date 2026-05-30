@@ -424,6 +424,41 @@ class DevelopmentEnvironment(private val context: Context) {
     /**
      * 获取安装引导文本
      */
+    /**
+     * 自动安装 Ubuntu 环境（通过 proot-distro）
+     */
+    suspend fun installUbuntu(onProgress: ((String) -> Unit)? = null): Boolean = withContext(Dispatchers.IO) {
+        if (!detectTermux()) {
+            onProgress?.invoke("Termux 未安装，无法安装 Ubuntu")
+            return@withContext false
+        }
+
+        try {
+            onProgress?.invoke("更新 Termux 包列表...")
+            executeCommand("pkg update -y 2>&1 | tail -5")
+            
+            onProgress?.invoke("安装 proot-distro...")
+            executeCommand("pkg install proot-distro -y 2>&1 | tail -10")
+            
+            onProgress?.invoke("安装 Ubuntu 24.04...")
+            val installResult = executeCommand("proot-distro install ubuntu 2>&1 | tail -20")
+            val installLog = installResult.stdout
+            onProgress?.invoke(installLog)
+            
+            val installed = File(UBUNTU_ROOT).exists()
+            if (installed) {
+                onProgress?.invoke("Ubuntu 安装成功!")
+            } else {
+                onProgress?.invoke("Ubuntu 安装可能未完成，请检查 Termux")
+            }
+            installed
+        } catch (e: Exception) {
+            onProgress?.invoke("安装异常: ${e.message}")
+            Log.e(TAG, "安装 Ubuntu 失败", e)
+            false
+        }
+    }
+
     fun getSetupGuide(): String {
         return """
 ╔══════════════════════════════════════╗

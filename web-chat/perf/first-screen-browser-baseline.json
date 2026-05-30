@@ -1,5 +1,5 @@
 {
-  "measuredAt": "2026-05-30T11:36:54.000Z",
+  "measuredAt": "2026-05-30T11:47:55.468Z",
   "chromium": "/nix/store/qa9cnw4v5xkxyip6mb9kxqfq1z4x2dx1-chromium-138.0.7204.100/bin/chromium",
   "iterations": 3,
   "viewport": {
@@ -19,13 +19,14 @@
       "rttMs": 10,
       "samples": 3,
       "metrics": {
-        "firstPaintMs": 124,
-        "firstContentfulPaintMs": 456,
-        "domContentLoadedMs": 176,
+        "firstPaintMs": 132,
+        "firstContentfulPaintMs": 452,
+        "domContentLoadedMs": 175,
         "loadMs": 176,
         "domInteractiveMs": 47,
-        "overlayReadyMs": 508,
-        "timeToInteractiveMs": 456
+        "overlayReadyMs": 507,
+        "timeToInteractiveMs": 507,
+        "totalBlockingTimeMs": 158
       },
       "estNetworkOnlyMs": {
         "gzip": 20,
@@ -40,13 +41,14 @@
       "rttMs": 150,
       "samples": 3,
       "metrics": {
-        "firstPaintMs": 2208,
-        "firstContentfulPaintMs": 3168,
-        "domContentLoadedMs": 2889,
-        "loadMs": 2890,
-        "domInteractiveMs": 189,
-        "overlayReadyMs": 3206,
-        "timeToInteractiveMs": 3168
+        "firstPaintMs": 2216,
+        "firstContentfulPaintMs": 3184,
+        "domContentLoadedMs": 2898,
+        "loadMs": 2898,
+        "domInteractiveMs": 194,
+        "overlayReadyMs": 3228,
+        "timeToInteractiveMs": 3228,
+        "totalBlockingTimeMs": 164
       },
       "estNetworkOnlyMs": {
         "gzip": 450,
@@ -61,13 +63,14 @@
       "rttMs": 400,
       "samples": 3,
       "metrics": {
-        "firstPaintMs": 8296,
-        "firstContentfulPaintMs": 11356,
-        "domContentLoadedMs": 10949,
+        "firstPaintMs": 8328,
+        "firstContentfulPaintMs": 11364,
+        "domContentLoadedMs": 10948,
         "loadMs": 10950,
-        "domInteractiveMs": 463,
-        "overlayReadyMs": 11426,
-        "timeToInteractiveMs": 11356
+        "domInteractiveMs": 469,
+        "overlayReadyMs": 11437,
+        "timeToInteractiveMs": 11437,
+        "totalBlockingTimeMs": 295
       },
       "estNetworkOnlyMs": {
         "gzip": 1600,

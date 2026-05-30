@@ -164,24 +164,51 @@ function round(value) {
   return value == null ? null : Math.round(value);
 }
 
-// Compute a time-to-interactive proxy: the start of the first quiet window
-// (>= TTI_QUIET_WINDOW_MS without long tasks) at or after FCP.
-function computeTti(fcp, longTasks, lastEventTime) {
+// Long tasks (Long Tasks API) only fire for main-thread work >= this many ms.
+// Everything above the threshold is "blocking" time the user can't interact through.
+const LONG_TASK_THRESHOLD_MS = 50;
+
+// Compute a "ready to use" time-to-interactive proxy.
+//
+// The naive "first quiet window strictly after FCP" definition collapses to FCP
+// on throttled phones, because the heavy parse/exec long tasks finish *just
+// before* the contentful paint, leaving nothing for a post-FCP search to find.
+// That hides the fact that the interactive control (the token input) isn't even
+// in the DOM yet at FCP.
+//
+// Instead we anchor at the moment the overlay is genuinely usable -- the later
+// of FCP and overlayReady (when `#web-chat-token` exists) -- then, Lighthouse
+// style, walk forward through long tasks and extend the candidate past any task
+// that starts before a full TTI_QUIET_WINDOW_MS of main-thread quiet has
+// elapsed. So the metric reflects when the control exists *and* the main thread
+// has settled, and it still captures trailing long tasks (e.g. late hydration).
+function computeTti(fcp, overlayReady, longTasks, lastEventTime) {
   if (fcp == null) return null;
-  const tasksAfter = longTasks
-    .filter((t) => t.start + t.dur > fcp)
-    .sort((a, b) => a.start - b.start);
-  let candidate = fcp;
-  for (const task of tasksAfter) {
-    if (task.start - candidate >= TTI_QUIET_WINDOW_MS) break;
-    candidate = Math.max(candidate, task.start + task.dur);
+  // Can't be "ready to use" before content paints or before the control exists.
+  const anchor = Math.max(fcp, overlayReady ?? fcp);
+  const sorted = [...longTasks].sort((a, b) => a.start - b.start);
+  let candidate = anchor;
+  for (const task of sorted) {
+    const end = task.start + task.dur;
+    if (end <= candidate) continue; // already covered by the anchor/earlier task
+    if (task.start - candidate >= TTI_QUIET_WINDOW_MS) break; // quiet window found
+    candidate = Math.max(candidate, end);
   }
   // Don't claim interactivity past the point we actually observed the page.
-  return Math.min(candidate, Math.max(lastEventTime, fcp));
+  return Math.min(candidate, Math.max(lastEventTime, anchor));
+}
+
+// Total Blocking Time: the summed main-thread blocking (each long task's time
+// over the 50 ms threshold) across the whole observed first-screen load. Unlike
+// the FCP-anchored TTI this *counts pre-FCP long tasks*, so it directly surfaces
+// the JS parse/exec cost that fires before the overlay paints -- exactly the
+// busyness the old TTI proxy threw away.
+function computeTbt(longTasks) {
+  return longTasks.reduce((sum, t) => sum + Math.max(0, t.dur - LONG_TASK_THRESHOLD_MS), 0);
 }
 
 async function runProfile(puppeteer, executablePath, baseUrl, profile) {
-  const samples = { fp: [], fcp: [], domContentLoaded: [], load: [], domInteractive: [], overlayReady: [], tti: [] };
+  const samples = { fp: [], fcp: [], domContentLoaded: [], load: [], domInteractive: [], overlayReady: [], tti: [], tbt: [] };
 
   const browser = await puppeteer.launch({
     executablePath,
@@ -256,7 +283,8 @@ async function runProfile(puppeteer, executablePath, baseUrl, profile) {
         };
       });
 
-      const tti = computeTti(metrics.fcp, metrics.longTasks, metrics.now);
+      const tti = computeTti(metrics.fcp, overlayReady, metrics.longTasks, metrics.now);
+      const tbt = computeTbt(metrics.longTasks);
       if (metrics.fp != null) samples.fp.push(metrics.fp);
       if (metrics.fcp != null) samples.fcp.push(metrics.fcp);
       if (metrics.domContentLoaded != null) samples.domContentLoaded.push(metrics.domContentLoaded);
@@ -264,6 +292,7 @@ async function runProfile(puppeteer, executablePath, baseUrl, profile) {
       if (metrics.domInteractive != null) samples.domInteractive.push(metrics.domInteractive);
       if (overlayReady != null) samples.overlayReady.push(overlayReady);
       if (tti != null) samples.tti.push(tti);
+      if (tbt != null) samples.tbt.push(tbt);
 
       await context.close();
     }
@@ -285,7 +314,8 @@ async function runProfile(puppeteer, executablePath, baseUrl, profile) {
       loadMs: round(median(samples.load)),
       domInteractiveMs: round(median(samples.domInteractive)),
       overlayReadyMs: round(median(samples.overlayReady)),
-      timeToInteractiveMs: round(median(samples.tti))
+      timeToInteractiveMs: round(median(samples.tti)),
+      totalBlockingTimeMs: round(median(samples.tbt))
     }
   };
 }
@@ -385,7 +415,7 @@ function printConsole(result) {
   console.log(`measured: ${result.measuredAt}   samples/profile: ${result.iterations}`);
   console.log(`viewport: ${result.viewport.width}x${result.viewport.height} @${result.viewport.deviceScaleFactor}x (mobile)`);
   console.log(
-    `\n  ${pad('profile', 34)}${pad('FP', 10)}${pad('FCP', 10)}${pad('overlay', 11)}${pad('TTI', 10)}${pad('load', 10)}`
+    `\n  ${pad('profile', 34)}${pad('FP', 10)}${pad('FCP', 10)}${pad('overlay', 11)}${pad('TTI', 10)}${pad('TBT', 10)}${pad('load', 10)}`
   );
   for (const p of result.profiles) {
     const m = p.metrics;
@@ -393,7 +423,7 @@ function printConsole(result) {
       `  ${pad(p.profile, 34)}${pad(ms(m.firstPaintMs), 10)}${pad(ms(m.firstContentfulPaintMs), 10)}${pad(
         ms(m.overlayReadyMs),
         11
-      )}${pad(ms(m.timeToInteractiveMs), 10)}${pad(ms(m.loadMs), 10)}`
+      )}${pad(ms(m.timeToInteractiveMs), 10)}${pad(ms(m.totalBlockingTimeMs), 10)}${pad(ms(m.loadMs), 10)}`
     );
   }
 
@@ -427,16 +457,24 @@ function writeReportMarkdown(result) {
   lines.push('');
   lines.push('## Measured first-screen timings (connection overlay)');
   lines.push('');
-  lines.push('FP = first paint, FCP = first contentful paint, overlay = token input present, TTI = first 2s quiet window after FCP.');
+  lines.push('FP = first paint, FCP = first contentful paint, overlay = token input present.');
   lines.push('');
-  lines.push('| profile | CPU | net | FP | FCP | overlay ready | TTI | load |');
-  lines.push('| --- | ---: | --- | ---: | ---: | ---: | ---: | ---: |');
+  lines.push(
+    'TTI ("ready to use") is anchored at the later of FCP and overlay-ready, then extended through any long task that fires before a 2s quiet window — so it reflects when the control exists *and* the main thread has settled, not just FCP.'
+  );
+  lines.push('');
+  lines.push(
+    'TBT (total blocking time) sums every long task\'s time over 50 ms across the whole load, **including the parse/exec tasks that fire before FCP** — the main-thread busyness the FCP-anchored timings cannot show.'
+  );
+  lines.push('');
+  lines.push('| profile | CPU | net | FP | FCP | overlay ready | TTI | TBT | load |');
+  lines.push('| --- | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: |');
   for (const p of result.profiles) {
     const m = p.metrics;
     lines.push(
       `| ${p.profile} | ${p.cpuRate}x | ${p.kbps} kbps / ${p.rttMs} ms | ${ms(m.firstPaintMs)} | ${ms(
         m.firstContentfulPaintMs
-      )} | ${ms(m.overlayReadyMs)} | ${ms(m.timeToInteractiveMs)} | ${ms(m.loadMs)} |`
+      )} | ${ms(m.overlayReadyMs)} | ${ms(m.timeToInteractiveMs)} | ${ms(m.totalBlockingTimeMs)} | ${ms(m.loadMs)} |`
     );
   }
   lines.push('');
@@ -468,18 +506,17 @@ function compareToBaseline(result) {
   }
   console.log('\n=== Comparison vs browser baseline ===');
   console.log(`baseline measured: ${baseline.measuredAt}`);
+  const delta = (cur, base) => (cur == null || base == null ? null : cur - base);
+  const fmt = (cur, base) => {
+    const d = delta(cur, base);
+    if (cur == null) return 'n/a (no baseline)';
+    if (d == null) return `${ms(cur)} (no baseline)`;
+    return `${ms(base)} -> ${ms(cur)} (${d >= 0 ? '+' : ''}${d} ms)`;
+  };
   for (const p of result.profiles) {
     const base = baseline.profiles?.find((b) => b.profile === p.profile);
-    const baseTti = base?.metrics?.timeToInteractiveMs;
-    const curTti = p.metrics.timeToInteractiveMs;
-    if (baseTti == null || curTti == null) {
-      console.log(`  ${pad(p.profile, 34)} TTI: ${ms(curTti)} (no baseline)`);
-      continue;
-    }
-    const delta = curTti - baseTti;
-    console.log(
-      `  ${pad(p.profile, 34)} TTI: ${ms(baseTti)} -> ${ms(curTti)} (${delta >= 0 ? '+' : ''}${delta} ms)`
-    );
+    console.log(`  ${pad(p.profile, 34)} TTI: ${fmt(p.metrics.timeToInteractiveMs, base?.metrics?.timeToInteractiveMs)}`);
+    console.log(`  ${pad('', 34)} TBT: ${fmt(p.metrics.totalBlockingTimeMs, base?.metrics?.totalBlockingTimeMs)}`);
   }
   console.log('');
 }

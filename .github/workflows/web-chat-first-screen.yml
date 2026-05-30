@@ -38,6 +38,9 @@ jobs:
       - name: Install dependencies
         if: steps.changes.outputs.changed == 'true'
         run: npm --prefix web-chat ci
+      - name: Unit tests (first-screen metric math)
+        if: steps.changes.outputs.changed == 'true'
+        run: npm --prefix web-chat test
       - name: Build web-chat
         if: steps.changes.outputs.changed == 'true'
         run: npm --prefix web-chat run build

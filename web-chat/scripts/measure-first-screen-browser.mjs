@@ -34,6 +34,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync, statSync } from 'node:fs';
 import { dirname, resolve, extname, normalize, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { computeTti, computeTbt } from './first-screen-metrics.mjs';
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const projectRoot = resolve(scriptDir, '..');
@@ -89,8 +90,6 @@ const PROFILES = [
 // Phone-like viewport (iPhone 12/13 logical resolution).
 const VIEWPORT = { width: 390, height: 844, deviceScaleFactor: 3, isMobile: true, hasTouch: true };
 
-// Quiet window (ms, page time) with no long tasks that marks the page "interactive".
-const TTI_QUIET_WINDOW_MS = 2_000;
 // Real wall-clock settle time we allow after load before reading metrics.
 const SETTLE_MS = 3_000;
 
@@ -190,49 +189,6 @@ function median(values) {
 
 function round(value) {
   return value == null ? null : Math.round(value);
-}
-
-// Long tasks (Long Tasks API) only fire for main-thread work >= this many ms.
-// Everything above the threshold is "blocking" time the user can't interact through.
-const LONG_TASK_THRESHOLD_MS = 50;
-
-// Compute a "ready to use" time-to-interactive proxy.
-//
-// The naive "first quiet window strictly after FCP" definition collapses to FCP
-// on throttled phones, because the heavy parse/exec long tasks finish *just
-// before* the contentful paint, leaving nothing for a post-FCP search to find.
-// That hides the fact that the interactive control (the token input) isn't even
-// in the DOM yet at FCP.
-//
-// Instead we anchor at the moment the overlay is genuinely usable -- the later
-// of FCP and overlayReady (when `#web-chat-token` exists) -- then, Lighthouse
-// style, walk forward through long tasks and extend the candidate past any task
-// that starts before a full TTI_QUIET_WINDOW_MS of main-thread quiet has
-// elapsed. So the metric reflects when the control exists *and* the main thread
-// has settled, and it still captures trailing long tasks (e.g. late hydration).
-function computeTti(fcp, overlayReady, longTasks, lastEventTime) {
-  if (fcp == null) return null;
-  // Can't be "ready to use" before content paints or before the control exists.
-  const anchor = Math.max(fcp, overlayReady ?? fcp);
-  const sorted = [...longTasks].sort((a, b) => a.start - b.start);
-  let candidate = anchor;
-  for (const task of sorted) {
-    const end = task.start + task.dur;
-    if (end <= candidate) continue; // already covered by the anchor/earlier task
-    if (task.start - candidate >= TTI_QUIET_WINDOW_MS) break; // quiet window found
-    candidate = Math.max(candidate, end);
-  }
-  // Don't claim interactivity past the point we actually observed the page.
-  return Math.min(candidate, Math.max(lastEventTime, anchor));
-}
-
-// Total Blocking Time: the summed main-thread blocking (each long task's time
-// over the 50 ms threshold) across the whole observed first-screen load. Unlike
-// the FCP-anchored TTI this *counts pre-FCP long tasks*, so it directly surfaces
-// the JS parse/exec cost that fires before the overlay paints -- exactly the
-// busyness the old TTI proxy threw away.
-function computeTbt(longTasks) {
-  return longTasks.reduce((sum, t) => sum + Math.max(0, t.dur - LONG_TASK_THRESHOLD_MS), 0);
 }
 
 async function runProfile(puppeteer, executablePath, baseUrl, profile) {

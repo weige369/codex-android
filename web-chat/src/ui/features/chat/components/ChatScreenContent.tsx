@@ -1,10 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react';
 import { ChatArea } from './ChatArea';
 import { CharacterSelectorPanel } from './CharacterSelectorPanel';
 import { ChatHistorySelector } from './ChatHistorySelector';
 import { ChatScreenHeader } from './ChatScreenHeader';
-import { AgentActivityPanel } from './AgentActivityPanel';
-import { CodexVersionManager } from './CodexVersionManager';
 import { AgentChatInputSection } from './style/input/agent/AgentChatInputSection';
 import { ClassicChatInputSection } from './style/input/classic/ClassicChatInputSection';
 import { ClassicChatSettingsBar } from './style/input/classic/ClassicChatSettingsBar';
@@ -14,6 +12,13 @@ import {
   getIsFloatingMode,
   toggleFloatingWindow
 } from '../viewmodel/FloatingWindowDelegate';
+
+const AgentActivityPanel = lazy(() =>
+  import('./AgentActivityPanel').then((m) => ({ default: m.AgentActivityPanel }))
+);
+const CodexVersionManager = lazy(() =>
+  import('./CodexVersionManager').then((m) => ({ default: m.CodexVersionManager }))
+);
 
 function countToolCalls(messages: WebChatMessage[]): { total: number; running: number } {
   let total = 0;
@@ -361,18 +366,22 @@ export function ChatScreenContent({
         </div>
 
         {activityPanelOpen ? (
-          <AgentActivityPanel
-            messages={viewModel.messages}
-            onClose={() => setActivityPanelOpen(false)}
-          />
+          <Suspense fallback={null}>
+            <AgentActivityPanel
+              messages={viewModel.messages}
+              onClose={() => setActivityPanelOpen(false)}
+            />
+          </Suspense>
         ) : null}
 
         {versionPanelOpen ? (
-          <CodexVersionManager
-            isConnected={!viewModel.showConnectionOverlay}
-            onClose={() => setVersionPanelOpen(false)}
-            token={viewModel.token || null}
-          />
+          <Suspense fallback={null}>
+            <CodexVersionManager
+              isConnected={!viewModel.showConnectionOverlay}
+              onClose={() => setVersionPanelOpen(false)}
+              token={viewModel.token || null}
+            />
+          </Suspense>
         ) : null}
       </div>
     </div>

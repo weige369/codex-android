@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { ChatHeader } from './ChatHeader';
-import { AgentActivityToggleButton } from './AgentActivityPanel';
-import { CodexVersionToggleButton } from './CodexVersionManager';
+import { AgentActivityToggleButton } from './AgentActivityToggleButton';
+import { CodexVersionToggleButton } from './CodexVersionToggleButton';
 
 function UsageRing({
   percent,

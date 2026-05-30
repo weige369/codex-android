@@ -28,6 +28,8 @@ android {
     namespace = "com.codex.android"
     compileSdk = 36
 
+
+
     signingConfigs {
         val releaseKeystorePath = localProperties.getProperty("RELEASE_STORE_FILE")
         val releaseStorePassword = localProperties.getProperty("RELEASE_STORE_PASSWORD")

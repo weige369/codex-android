@@ -38,6 +38,7 @@ fun WorkspaceScreen(
     onOpenMCP: () -> Unit,
     onOpenGitHub: () -> Unit,
     onOpenDevEnv: () -> Unit = {},
+    onOpenDiagnostic: () -> Unit = {},
     onOpenFileBrowser: (() -> Unit)? = null,
     onOpenAbout: (() -> Unit)? = null,
     onToggleRuntime: () -> Unit,
@@ -68,6 +69,7 @@ fun WorkspaceScreen(
                     ToolbarAction(Icons.Default.Extension, "Skills", onOpenSkills)
                     ToolbarAction(Icons.Default.Memory, "MCP", onOpenMCP)
                     ToolbarAction(Icons.Default.Build, "环境", onOpenDevEnv)
+                    ToolbarAction(Icons.Default.BugReport, "诊断", onOpenDiagnostic)
                     ToolbarAction(Icons.Default.Settings, "设置", onOpenSettings)
                 }
             }

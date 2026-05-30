@@ -30,6 +30,7 @@ import com.codex.android.service.CodexRuntimeService
 import com.codex.android.service.RuntimeState
 import com.codex.android.ui.about.AboutScreen
 import com.codex.android.ui.environment.DevEnvironmentScreen
+import com.codex.android.ui.diagnostics.DiagnosticsScreen
 import com.codex.android.ui.files.FileBrowserScreen
 import com.codex.android.ui.github.GitHubImportScreen
 import com.codex.android.ui.mcp.CodexMCPScreen
@@ -68,6 +69,7 @@ class CodexActivity : ComponentActivity() {
         data object GitHubImport : Screen()
         data object FileBrowser : Screen()
         data object DevEnvironment : Screen()
+        data object Diagnostic : Screen()
         data object About : Screen()
     }
 
@@ -169,6 +171,7 @@ class CodexActivity : ComponentActivity() {
                                     onOpenMCP = { navigateTo(Screen.MCP) },
                                     onOpenGitHub = { navigateTo(Screen.GitHubImport) },
                                     onOpenDevEnv = { navigateTo(Screen.DevEnvironment) },
+                                    onOpenDiagnostic = { navigateTo(Screen.Diagnostic) },
                                     onToggleRuntime = {
                                         if (isRunning) {
                                             CodexRuntimeService.stop(this@CodexActivity)
@@ -196,6 +199,9 @@ class CodexActivity : ComponentActivity() {
                                 onBack = { navigateTo(Screen.Workspace) }
                             )
                             Screen.DevEnvironment -> DevEnvironmentScreen(
+                                onBack = { navigateTo(Screen.Workspace) }
+                            )
+                            Screen.Diagnostic -> DiagnosticsScreen(
                                 onBack = { navigateTo(Screen.Workspace) }
                             )
                             Screen.About -> AboutScreen(onBack = { navigateTo(Screen.Workspace) })

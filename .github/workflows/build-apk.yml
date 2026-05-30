@@ -22,6 +22,13 @@ jobs:
         run: |
           sdkmanager "build-tools;36.0.0" --sdk_root=$ANDROID_HOME || true
           ls $ANDROID_HOME/build-tools/
+      - name: Setup AAPT2 path for gradle.properties override
+        run: |
+          # Create the expected aapt2 path for gradle.properties override
+          sudo mkdir -p /opt/android-sdk/build-tools/36.0.0/
+          sudo ln -sf $ANDROID_HOME/build-tools/36.0.0/aapt2 /opt/android-sdk/build-tools/36.0.0/aapt2
+          echo "AAPT2 symlink created:"
+          ls -la /opt/android-sdk/build-tools/36.0.0/aapt2
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v3
       - name: Download binary dependencies

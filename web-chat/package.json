@@ -13,6 +13,7 @@
     "sync:android-assets": "node ./scripts/sync-to-android-assets.mjs"
   },
   "dependencies": {
+    "dompurify": "^3.4.7",
     "liquid-glass-react": "^1.1.1",
     "react": "^19.2.5",
     "react-dom": "^19.2.5",

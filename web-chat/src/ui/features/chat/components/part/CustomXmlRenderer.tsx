@@ -1,10 +1,12 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { Suspense, lazy, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { DetailsTagRenderer } from './DetailsTagRenderer';
 import { MarkdownRenderer } from './MarkdownRenderer';
 import { AnimatedExpandBody, StructuredExpandRow } from './StructuredExpand';
 import { ToolDisplayComponent } from './ToolDisplayComponents';
 import { ToolResultDisplay } from './ToolResultDisplay';
 import type { WebMessageContentBlock } from '../../util/chatTypes';
+
+const HtmlBlock = lazy(() => import('./HtmlBlockImpl'));
 
 const BUILT_IN_TAGS = new Set([
   'think',
@@ -385,7 +387,11 @@ function renderXmlBlock(
   }
 
   if (tagName === 'html') {
-    return <div className="structured-html-card" dangerouslySetInnerHTML={{ __html: block.content ?? '' }} />;
+    return (
+      <Suspense fallback={<div className="structured-html-card" />}>
+        <HtmlBlock content={block.content ?? ''} />
+      </Suspense>
+    );
   }
 
   if (tagName === 'font') {

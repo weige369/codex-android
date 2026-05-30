@@ -32,6 +32,10 @@ function resolveVendorChunk(id: string): string | undefined {
   const segments = id.split('node_modules/');
   const packagePath = segments[segments.length - 1] ?? '';
 
+  if (packagePath.startsWith('dompurify')) {
+    return 'html-sanitize';
+  }
+
   if (MARKDOWN_PACKAGE_HINTS.some((hint) => packagePath.startsWith(hint))) {
     return 'markdown';
   }

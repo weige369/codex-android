@@ -18,6 +18,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.ComposeView
@@ -57,9 +58,8 @@ class CodexActivity : ComponentActivity() {
     private var _wsPort = CodexRuntimeService.DEFAULT_WS_PORT
     private var _isRuntimeRunning = false
     private var _wsConnected = false
-    private var _currentScreen: Screen = Screen.Workspace
-
     // Compose 响应式状态（由 BroadcastReceiver 更新，Compose 读取）
+    private val _currentScreen = mutableStateOf<Screen>(Screen.Workspace)
     private val _runtimeStateFlow = mutableStateOf(RuntimeState.STOPPED)
     private val _wsPortFlow = mutableIntStateOf(CodexRuntimeService.DEFAULT_WS_PORT)
     private val _isRunningFlow = mutableStateOf(false)
@@ -150,7 +150,7 @@ class CodexActivity : ComponentActivity() {
                         modifier = Modifier.fillMaxSize(),
                         color = MaterialTheme.colorScheme.background
                     ) {
-                        var screen by remember { mutableStateOf<Screen>(Screen.Workspace) }
+                        val screen by _currentScreen
                         var runtimeState by remember { mutableStateOf(_runtimeState) }
                         var wsPort by remember { mutableIntStateOf(_wsPort) }
                         var isRunning by remember { mutableStateOf(_isRuntimeRunning) }
@@ -218,8 +218,7 @@ class CodexActivity : ComponentActivity() {
     }
 
     private fun navigateTo(screen: Screen) {
-        _currentScreen = screen
-        // Navigation handled reactively; Compose recomposes on screen state change
+        _currentScreen.value = screen
     }
 
     fun setWebViewRef(webView: WebView?) {

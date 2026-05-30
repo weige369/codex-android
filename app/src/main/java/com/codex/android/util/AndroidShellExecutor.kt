@@ -121,8 +121,9 @@ object AndroidShellExecutor {
             }
             PermissionLevel.UBUNTU -> {
                 val envObj = devEnv
-                if (envObj != null && envObj.isUbuntuInstalled()) {
-                    envObj.executeCommand(command, useUbuntu = true, env = env)
+                if (envObj != null && envObj.detectTermux()) {
+                    val ubuntuCmd = "proot-distro login ubuntu -- bash -c '${command.replace("'", "'\\''")}'"
+                    envObj.runInTermux(ubuntuCmd, env)
                 } else {
                     ProcessBuilder("sh", "-c", command)
                         .apply { environment().putAll(env) }

@@ -12,8 +12,8 @@ import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
@@ -24,22 +24,30 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import com.codex.android.codex.CodexManager
 import com.codex.android.service.CodexRuntimeService
+import com.codex.android.ui.theme.*
 
 /**
- * Codex 设置界面。
- * 完全使用 Codex Material 3 风格，集成在 Codex 设置菜单中。
+ * Codex settings screen.
+ * Extended with navigation to Skills, MCP, GitHub, Diagnostics, and About.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CodexSettingsScreen(
-    onBack: () -> Unit = {}
+    onBack: () -> Unit = {},
+    onOpenSkills: (() -> Unit)? = null,
+    onOpenMCP: (() -> Unit)? = null,
+    onOpenGitHub: (() -> Unit)? = null,
+    onOpenDiagnostic: (() -> Unit)? = null,
+    onOpenAbout: (() -> Unit)? = null
 ) {
     val context = LocalContext.current
     val codexManager = remember { CodexManager(context) }
 
-    // 连接方式
+    // Connection settings
     var connMode by remember { mutableStateOf(
         context.getSharedPreferences("codex_prefs", Context.MODE_PRIVATE)
             .getString("conn_mode", "local")
@@ -58,7 +66,7 @@ fun CodexSettingsScreen(
     ) }
     var showApiKey by remember { mutableStateOf(false) }
 
-    // 二进制状态
+    // Binary status
     val isInstalled = codexManager.isInstalled()
     val binarySize = if (isInstalled) {
         "%.1f MB".format(codexManager.codexBinary.length() / (1024.0 * 1024.0))
@@ -67,7 +75,7 @@ fun CodexSettingsScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Codex 设置", fontSize = 18.sp) },
+                title = { Text("设置", fontSize = 18.sp, fontWeight = FontWeight.Bold) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回")
@@ -87,7 +95,7 @@ fun CodexSettingsScreen(
             verticalArrangement = Arrangement.spacedBy(8.dp),
             contentPadding = PaddingValues(vertical = 16.dp)
         ) {
-            // ===== 连接方式 =====
+            // ===== Connection Mode =====
             item {
                 SectionHeader("连接方式")
             }
@@ -102,7 +110,7 @@ fun CodexSettingsScreen(
                     Column(modifier = Modifier.padding(16.dp)) {
                         ConnModeOption(
                             title = "本地 Codex CLI (推荐)",
-                            subtitle = "下载并运行原生 Codex CLI 二进制，完整 Agent 功能",
+                            subtitle = "下载并运行原生 Codex CLI 二进制",
                             icon = Icons.Default.Terminal,
                             selected = connMode == "local",
                             onClick = { connMode = "local"; saveConnMode(context, "local") }
@@ -110,7 +118,7 @@ fun CodexSettingsScreen(
                         Spacer(Modifier.height(4.dp))
                         ConnModeOption(
                             title = "OpenAI 兼容 API",
-                            subtitle = "通过 API Key 连接，无需下载二进制",
+                            subtitle = "通过 API Key 连接云端",
                             icon = Icons.Default.Cloud,
                             selected = connMode == "api",
                             onClick = { connMode = "api"; saveConnMode(context, "api") }
@@ -127,7 +135,7 @@ fun CodexSettingsScreen(
                 }
             }
 
-            // ===== API 配置 (api 模式下显示) =====
+            // ===== API Settings (when API mode) =====
             if (connMode == "api") {
                 item {
                     SectionHeader("API 配置")
@@ -135,148 +143,176 @@ fun CodexSettingsScreen(
                 item {
                     Card(
                         modifier = Modifier.fillMaxWidth(),
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceVariant
+                        )
                     ) {
                         Column(modifier = Modifier.padding(16.dp)) {
                             OutlinedTextField(
-                                value = apiKey,
-                                onValueChange = {
-                                    apiKey = it
-                                    context.getSharedPreferences("codex_prefs", Context.MODE_PRIVATE)
-                                        .edit().putString("api_key", it).apply()
-                                },
-                                label = { Text("API Key") },
-                                placeholder = { Text("sk-...") },
+                                value = apiUrl,
+                                onValueChange = { apiUrl = it; savePref(context, "api_url", it) },
+                                label = { Text("API URL") },
                                 modifier = Modifier.fillMaxWidth(),
                                 singleLine = true,
-                                visualTransformation = if (showApiKey) VisualTransformation.None
-                                    else PasswordVisualTransformation(),
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri)
+                            )
+                            Spacer(Modifier.height(8.dp))
+                            OutlinedTextField(
+                                value = apiModel,
+                                onValueChange = { apiModel = it; savePref(context, "api_model", it) },
+                                label = { Text("模型") },
+                                modifier = Modifier.fillMaxWidth(),
+                                singleLine = true
+                            )
+                            Spacer(Modifier.height(8.dp))
+                            OutlinedTextField(
+                                value = apiKey,
+                                onValueChange = { apiKey = it; savePref(context, "api_key", it) },
+                                label = { Text("API Key") },
+                                modifier = Modifier.fillMaxWidth(),
+                                singleLine = true,
+                                visualTransformation = if (showApiKey) VisualTransformation.None else PasswordVisualTransformation(),
                                 trailingIcon = {
                                     IconButton(onClick = { showApiKey = !showApiKey }) {
                                         Icon(
-                                            if (showApiKey) Icons.Default.VisibilityOff
-                                            else Icons.Default.Visibility,
-                                            contentDescription = null
+                                            if (showApiKey) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                            if (showApiKey) "隐藏" else "显示"
                                         )
                                     }
                                 },
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password)
                             )
-                            Spacer(Modifier.height(8.dp))
-                            OutlinedTextField(
-                                value = apiUrl,
-                                onValueChange = {
-                                    apiUrl = it
-                                    context.getSharedPreferences("codex_prefs", Context.MODE_PRIVATE)
-                                        .edit().putString("api_url", it).apply()
-                                },
-                                label = { Text("API 地址") },
-                                modifier = Modifier.fillMaxWidth(),
-                                singleLine = true
-                            )
-                            Spacer(Modifier.height(8.dp))
-                            OutlinedTextField(
-                                value = apiModel,
-                                onValueChange = {
-                                    apiModel = it
-                                    context.getSharedPreferences("codex_prefs", Context.MODE_PRIVATE)
-                                        .edit().putString("api_model", it).apply()
-                                },
-                                label = { Text("模型") },
-                                placeholder = { Text("gpt-4o") },
-                                modifier = Modifier.fillMaxWidth(),
-                                singleLine = true
-                            )
                         }
                     }
                 }
             }
 
-            // ===== 二进制状态 (local 模式下显示) =====
-            if (connMode == "local") {
-                item {
-                    SectionHeader("Codex 运行时")
-                }
-                item {
-                    Card(
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
-                    ) {
-                        Column(modifier = Modifier.padding(16.dp)) {
-                            SettingsRow("状态", if (isInstalled) "✅ 已安装" else "❌ 未安装")
-                            if (isInstalled) {
-                                SettingsRow("版本", CodexManager.CODEX_VERSION)
-                                SettingsRow("大小", binarySize)
-                            }
-                            Spacer(Modifier.height(8.dp))
-                            val connMode = context.getSharedPreferences("codex_prefs", Context.MODE_PRIVATE)
-                                .getString("conn_mode", "local")
-                            if (connMode == "local") {
-                                if (isInstalled) {
-                                    Button(
-                                        onClick = { CodexRuntimeService.start(context) },
-                                        modifier = Modifier.fillMaxWidth(),
-                                        colors = ButtonDefaults.buttonColors(
-                                            containerColor = MaterialTheme.colorScheme.primary
-                                        )
-                                    ) { Text("启动 Codex 运行时") }
-                                } else {
-                                    Button(
-                                        onClick = { CodexRuntimeService.start(context) },
-                                        modifier = Modifier.fillMaxWidth(),
-                                        colors = ButtonDefaults.buttonColors(
-                                            containerColor = MaterialTheme.colorScheme.primary
-                                        )
-                                    ) { Text("下载并启动 Codex CLI") }
-                                }
-                            } else {
-                                Button(
-                                    onClick = {
-                                        Toast.makeText(context, "API 模式：请在设置中配置 API Key 和 URL", Toast.LENGTH_SHORT).show()
-                                    },
-                                    modifier = Modifier.fillMaxWidth(),
-                                    colors = ButtonDefaults.buttonColors(
-                                        containerColor = MaterialTheme.colorScheme.secondary
-                                    )
-                                ) { Text("🔗 API 模式已启用") }
-                            }
-                        }
-                    }
-                }
-            }
-
-            // ===== MCP & Skills =====
+            // ===== Codex Binary =====
             item {
-                SectionHeader("MCP & Skills")
+                SectionHeader("Codex CLI 二进制")
             }
             item {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant
+                    )
                 ) {
                     Column(modifier = Modifier.padding(16.dp)) {
-                        Text(
-                            "MCP 和 Skills 管理功能开发中...",
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            fontSize = 14.sp
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column {
+                                Text("状态", fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text(
+                                    if (isInstalled) "已安装 ($binarySize)" else "未安装",
+                                    fontWeight = FontWeight.Medium,
+                                    fontSize = 14.sp
+                                )
+                            }
+                            if (!isInstalled) {
+                                Button(
+                                    onClick = { CodexRuntimeService.start(context) },
+                                    colors = ButtonDefaults.buttonColors(containerColor = CodexPrimary)
+                                ) {
+                                    Text("下载")
+                                }
+                            }
+                        }
+                        if (isInstalled) {
+                            Spacer(Modifier.height(8.dp))
+                            LinearProgressIndicator(
+                                progress = { 1f },
+                                modifier = Modifier.fillMaxWidth().height(4.dp),
+                                color = StatusOnline,
+                                trackColor = StatusOnline.copy(alpha = 0.1f)
+                            )
+                        }
+                    }
+                }
+            }
+
+            // ===== Feature Navigation =====
+            // ===== 手动导入二进制 =====
+            item {
+                SectionHeader("手动导入")
+            }
+            item {
+                ManualImportCard(
+                    codexManager = codexManager,
+                    context = context
+                )
+            }
+
+            item {
+                SectionHeader("功能")
+            }
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant
+                    )
+                ) {
+                    Column(modifier = Modifier.padding(8.dp)) {
+                        if (onOpenSkills != null) {
+                            SettingsNavItem(
+                                Icons.Default.Extension,
+                                "Skills 管理",
+                                "安装和管理 Codex 插件",
+                                onClick = onOpenSkills
+                            )
+                        }
+                        if (onOpenMCP != null) {
+                            SettingsNavItem(
+                                Icons.Default.Memory,
+                                "MCP 服务器",
+                                "Android 系统工具集成",
+                                onClick = onOpenMCP
+                            )
+                        }
+                        if (onOpenGitHub != null) {
+                            SettingsNavItem(
+                                Icons.Default.Code,
+                                "GitHub 导入",
+                                "从 GitHub 导入仓库",
+                                onClick = onOpenGitHub
+                            )
+                        }
+                        SettingsNavItem(
+                            Icons.Default.BugReport,
+                            "诊断检查",
+                            "运行设备诊断测试",
+                            onClick = { onOpenDiagnostic?.invoke() }
+                        )
+                        SettingsNavItem(
+                            Icons.Default.Info,
+                            "关于",
+                            "版本和系统信息",
+                            onClick = { onOpenAbout?.invoke() }
                         )
                     }
                 }
             }
 
-            // ===== 关于 =====
+            // ===== Info =====
             item {
                 SectionHeader("关于")
             }
             item {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant
+                    )
                 ) {
                     Column(modifier = Modifier.padding(16.dp)) {
                         SettingsRow("Codex CLI 版本", CodexManager.CODEX_VERSION)
                         SettingsRow("Agent 引擎", "Codex CLI (OpenAI)")
                         SettingsRow("集成方式", "WebSocket JSON-RPC")
+                        SettingsRow("应用版本", "1.11.0+7")
                     }
                 }
             }
@@ -290,10 +326,10 @@ fun CodexSettingsScreen(
 private fun SectionHeader(title: String) {
     Text(
         text = title,
-        fontSize = 13.sp,
+        fontSize = 12.sp,
         fontWeight = FontWeight.SemiBold,
         color = MaterialTheme.colorScheme.primary,
-        modifier = Modifier.padding(top = 8.dp, bottom = 4.dp, start = 4.dp)
+        modifier = Modifier.padding(top = 12.dp, bottom = 4.dp, start = 4.dp)
     )
 }
 
@@ -343,19 +379,156 @@ private fun ConnModeOption(
 }
 
 @Composable
+private fun SettingsNavItem(
+    icon: ImageVector,
+    title: String,
+    subtitle: String,
+    onClick: () -> Unit
+) {
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(10.dp),
+        color = MaterialTheme.colorScheme.surface,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier.padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(icon, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(22.dp))
+            Spacer(Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(title, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                Text(subtitle, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Icon(
+                Icons.Default.KeyboardArrowRight,
+                null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(18.dp)
+            )
+        }
+    }
+}
+
+@Composable
+private fun ManualImportCard(
+    codexManager: CodexManager,
+    context: Context
+) {
+    val scope = rememberCoroutineScope()
+    var isImporting by remember { mutableStateOf(false) }
+    var importStatus by remember { mutableStateOf<String?>(null) }
+
+    val importLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: android.net.Uri? ->
+        if (uri != null) {
+            isImporting = true
+            importStatus = "正在导入..."
+            try {
+                val inputStream = context.contentResolver.openInputStream(uri)
+                val tempFile = java.io.File(context.cacheDir, "codex-import")
+                inputStream?.use { input ->
+                    tempFile.outputStream().use { output ->
+                        input.copyTo(output)
+                    }
+                }
+                val success = codexManager.importBinary(tempFile)
+                tempFile.delete()
+                isImporting = false
+                if (success) {
+                    importStatus = "导入成功! (${codexManager.codexBinary.length() / 1024 / 1024}MB)"
+                    Toast.makeText(context, "Codex 二进制导入成功", Toast.LENGTH_SHORT).show()
+                } else {
+                    importStatus = "导入失败，文件可能无效"
+                    Toast.makeText(context, "导入失败，请检查文件", Toast.LENGTH_SHORT).show()
+                }
+            } catch (e: Exception) {
+                isImporting = false
+                importStatus = "导入异常: ${e.message}"
+                Toast.makeText(context, "导入失败: ${e.message}", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant
+        )
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(
+                "如果自动下载失败，可以手动导入 Codex 二进制文件",
+                fontSize = 13.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(Modifier.height(8.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                OutlinedButton(
+                    onClick = { importLauncher.launch("*/*") },
+                    modifier = Modifier.weight(1f),
+                    enabled = !isImporting
+                ) {
+                    Icon(Icons.Default.Upload, null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("选择文件")
+                }
+
+                Button(
+                    onClick = {
+                        isImporting = true
+                        importStatus = "下载中..."
+                        CodexRuntimeService.start(context)
+                        isImporting = false
+                    },
+                    modifier = Modifier.weight(1f),
+                    enabled = !isImporting,
+                    colors = ButtonDefaults.buttonColors(containerColor = CodexPrimary)
+                ) {
+                    Icon(Icons.Default.CloudDownload, null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("重试下载")
+                }
+            }
+
+            if (importStatus != null) {
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    importStatus!!,
+                    fontSize = 12.sp,
+                    color = if (importStatus!!.contains("成功")) StatusOnline else MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontWeight = FontWeight.Medium
+                )
+            }
+        }
+    }
+}
+
+@Composable
 private fun SettingsRow(label: String, value: String) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 4.dp),
+            .padding(vertical = 3.dp),
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
-        Text(label, fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Text(value, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+        Text(label, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(value, fontSize = 13.sp, fontWeight = FontWeight.Medium)
     }
 }
 
 private fun saveConnMode(context: Context, mode: String) {
     context.getSharedPreferences("codex_prefs", Context.MODE_PRIVATE)
         .edit().putString("conn_mode", mode).apply()
+}
+
+private fun savePref(context: Context, key: String, value: String) {
+    context.getSharedPreferences("codex_prefs", Context.MODE_PRIVATE)
+        .edit().putString(key, value).apply()
 }

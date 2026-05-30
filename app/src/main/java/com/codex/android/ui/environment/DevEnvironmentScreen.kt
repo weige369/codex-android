@@ -87,7 +87,7 @@ fun DevEnvironmentScreen(
             }
 
             // ===== Termux 安装引导 =====
-            if (envInfo?.state == DevelopmentEnvironment.EnvState.TERMUX_MISSING) {
+            if (false) {
                 item {
                     TermuxSetupCard(
                         onInstallTermux = {
@@ -102,7 +102,7 @@ fun DevEnvironmentScreen(
             }
 
             // ===== 快速操作 =====
-            if (envInfo?.state != DevelopmentEnvironment.EnvState.TERMUX_MISSING) {
+            if (envInfo?.state != DevelopmentEnvironment.EnvState.ERROR) {
                 item {
                     SectionTitle("快速操作")
                 }
@@ -121,10 +121,8 @@ fun DevEnvironmentScreen(
                             installLog = ""
                             currentAction = "ubuntu"
                             scope.launch {
-                                devEnv.installUbuntu { progress ->
-                                    installLog += "\n$progress"
-                                    installProgress = progress
-                                }
+                                // Ubuntu needs Termux - show guide
+                                installLog = "\n请先安装 Termux 后执行:\n  pkg install proot-distro\n  proot-distro install ubuntu"
                                 envInfo = devEnv.getEnvironmentInfo()
                                 isInstalling = false
                                 currentAction = null
@@ -146,10 +144,8 @@ fun DevEnvironmentScreen(
                             installLog = ""
                             currentAction = "tools"
                             scope.launch {
-                                devEnv.installDevTools { progress ->
-                                    installLog += "\n$progress"
-                                    installProgress = progress
-                                }
+                                // Dev tools need Termux - show guide
+                                installLog = "\n请先安装 Termux 后执行:\n  pkg install nodejs-lts python git"
                                 envInfo = devEnv.getEnvironmentInfo()
                                 isInstalling = false
                                 currentAction = null
@@ -209,7 +205,7 @@ fun DevEnvironmentScreen(
             }
 
             // ===== 已安装工具列表 =====
-            if (envInfo != null && envInfo!!.state != DevelopmentEnvironment.EnvState.TERMUX_MISSING) {
+            if (envInfo != null && envInfo!!.state != DevelopmentEnvironment.EnvState.ERROR) {
                 item {
                     SectionTitle("已安装环境")
                 }
@@ -220,7 +216,7 @@ fun DevEnvironmentScreen(
             }
 
             // ===== 已安装工具详情 =====
-            if (envInfo != null && envInfo!!.state != DevelopmentEnvironment.EnvState.TERMUX_MISSING) {
+            if (envInfo != null && envInfo!!.state != DevelopmentEnvironment.EnvState.ERROR) {
                 item {
                     SectionTitle("工具版本")
                 }
@@ -232,7 +228,7 @@ fun DevEnvironmentScreen(
                         )
                     ) {
                         Column(modifier = Modifier.padding(16.dp)) {
-                            ToolVersionRow("Termux", envInfo?.termuxVersion ?: "-", envInfo?.state != DevelopmentEnvironment.EnvState.TERMUX_MISSING)
+                            ToolVersionRow("Termux", envInfo?.termuxVersion ?: "-", envInfo?.state != DevelopmentEnvironment.EnvState.ERROR)
                             ToolVersionRow("Node.js", envInfo?.nodeVersion ?: "-", envInfo?.hasNodeJs == true)
                             ToolVersionRow("Python", envInfo?.pythonVersion ?: "-", envInfo?.hasPython == true)
                             ToolVersionRow("Git", envInfo?.gitVersion ?: "-", envInfo?.hasGit == true)
@@ -288,16 +284,12 @@ private fun EnvironmentStatusCard(
                 // 状态图标和文字
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     val (icon, color, text) = when (envInfo.state) {
-                        DevelopmentEnvironment.EnvState.FULLY_READY -> 
-                            Triple(Icons.Default.CheckCircle, Color(0xFF2ED573), "环境就绪")
                         DevelopmentEnvironment.EnvState.UBUNTU_READY -> 
                             Triple(Icons.Default.CheckCircle, Color(0xFF2ED573), "Ubuntu 已安装")
-                        DevelopmentEnvironment.EnvState.UBUNTU_INSTALLING -> 
-                            Triple(Icons.Default.HourglassTop, Color(0xFFFFA502), "Ubuntu 安装中")
                         DevelopmentEnvironment.EnvState.TERMUX_READY -> 
-                            Triple(Icons.Default.Info, Color(0xFFFFA502), "Termux 已安装，工具未就绪")
-                        DevelopmentEnvironment.EnvState.TERMUX_MISSING -> 
-                            Triple(Icons.Default.ErrorOutline, Color(0xFFFF4757), "Termux 未安装")
+                            Triple(Icons.Default.Info, Color(0xFFFFA502), "Termux 已安装")
+                        DevelopmentEnvironment.EnvState.SELF_CONTAINED -> 
+                            Triple(Icons.Default.CheckCircle, Color(0xFF2ED573), "自包含模式")
                         DevelopmentEnvironment.EnvState.ERROR -> 
                             Triple(Icons.Default.Error, Color(0xFFFF4757), "环境异常")
                     }
@@ -395,7 +387,7 @@ private fun ToolStatusList(info: DevelopmentEnvironment.EnvInfo) {
         )
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
-            ToolStatusRow("Termux", info.state != DevelopmentEnvironment.EnvState.TERMUX_MISSING)
+            ToolStatusRow("Termux", info.state != DevelopmentEnvironment.EnvState.ERROR)
             ToolStatusRow("Ubuntu", info.hasUbuntu)
             ToolStatusRow("Node.js", info.hasNodeJs)
             ToolStatusRow("Python", info.hasPython)

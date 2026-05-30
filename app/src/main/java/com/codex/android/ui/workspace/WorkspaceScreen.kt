@@ -1,16 +1,22 @@
 package com.codex.android.ui.workspace
 
-import android.util.Log
-import android.webkit.JavascriptInterface
 import android.webkit.WebView
+import androidx.compose.animation.*
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -19,10 +25,12 @@ import com.codex.android.bridge.CodexBridge
 import com.codex.android.codex.CodexManager
 import com.codex.android.service.RuntimeState
 import com.codex.android.ui.components.AgentStatusBar
+import com.codex.android.ui.theme.*
 
 /**
- * Codex 工作区主界面。
- * WebView（Codex UI）+ 底部状态栏。
+ * Codex workspace main screen.
+ * Layout: TopActionBar -> WebView (fill) -> AgentStatusBar
+ * This avoids WebView consuming touch events from overlay composables.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -33,6 +41,7 @@ fun WorkspaceScreen(
     workspacePath: String,
     wsPort: Int,
     codexBridge: CodexBridge?,
+    onWebViewReady: ((android.webkit.WebView) -> Unit)? = null,
     onOpenSettings: () -> Unit,
     onOpenSkills: () -> Unit,
     onOpenMCP: () -> Unit,
@@ -45,116 +54,143 @@ fun WorkspaceScreen(
     onExportFile: ((String) -> Unit)? = null
 ) {
     val isRunning = runtimeState == RuntimeState.RUNNING
+    val isStarting = runtimeState == RuntimeState.STARTING ||
+                     runtimeState == RuntimeState.DOWNLOADING ||
+                     runtimeState == RuntimeState.EXTRACTING
+    val hasError = runtimeState == RuntimeState.ERROR
 
-    Scaffold(
-        topBar = {
-            Surface(
-                color = MaterialTheme.colorScheme.surface,
-                shadowElevation = 1.dp
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 8.dp, vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        "Codex",
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 16.sp,
-                        color = MaterialTheme.colorScheme.primary
-                    )
-                    Spacer(Modifier.weight(1f))
-                    ToolbarAction(Icons.Default.Code, "GitHub", onOpenGitHub)
-                    ToolbarAction(Icons.Default.Extension, "Skills", onOpenSkills)
-                    ToolbarAction(Icons.Default.Memory, "MCP", onOpenMCP)
-                    ToolbarAction(Icons.Default.Build, "环境", onOpenDevEnv)
-                    ToolbarAction(Icons.Default.BugReport, "诊断", onOpenDiagnostic)
-                    ToolbarAction(Icons.Default.Settings, "设置", onOpenSettings)
-                }
-            }
-        },
-        bottomBar = {
-            AgentStatusBar(
-                state = runtimeState,
-                isConnected = isWsConnected,
-                onToggle = onToggleRuntime
-            )
-        }
-    ) { padding ->
+    Column(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+        // Top action bar
+        WorkspaceTopBar(
+            isRunning = isRunning,
+            isStarting = isStarting,
+            hasError = hasError,
+            runtimeState = runtimeState,
+            onToggleRuntime = onToggleRuntime,
+            onOpenGitHub = onOpenGitHub,
+            onOpenSkills = onOpenSkills,
+            onOpenMCP = onOpenMCP,
+            onOpenDevEnv = onOpenDevEnv,
+            onOpenDiagnostic = onOpenDiagnostic,
+            onOpenSettings = onOpenSettings,
+            onOpenFileBrowser = onOpenFileBrowser,
+            onOpenAbout = onOpenAbout
+        )
+
+        // Main content area with WebView
         Box(
             modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
+                .fillMaxWidth()
+                .weight(1f)
         ) {
-            AndroidView(
-                factory = { ctx ->
-                    // WebView 必须在主线程创建（需要 Looper）
-                    val webView = if (android.os.Looper.myLooper() == null) {
-                        // 如果不在主线程，通过 CountDownLatch 同步等待主线程创建
-                        val latch = java.util.concurrent.CountDownLatch(1)
-                        val holder = arrayOf<WebView?>(null)
-                        android.os.Handler(android.os.Looper.getMainLooper()).post {
-                            try { holder[0] = WebView(ctx) } catch (_: Exception) {}
-                            latch.countDown()
-                        }
-                        latch.await(5, java.util.concurrent.TimeUnit.SECONDS)
-                        holder[0] ?: WebView(ctx)
-                    } else {
-                        WebView(ctx)
-                    }
-                    webView.apply {
-                        settings.javaScriptEnabled = true
-                        settings.domStorageEnabled = true
-                        settings.allowFileAccess = true
-                        settings.loadWithOverviewMode = true
-                        settings.useWideViewPort = true
-                        settings.builtInZoomControls = false
-                        settings.mediaPlaybackRequiresUserGesture = false
+            // Show startup/error placeholder when WebView not active
+            if (!isRunning && !isWsConnected) {
+                StartPlaceholder(
+                    runtimeState = runtimeState,
+                    onToggleRuntime = onToggleRuntime
+                )
+            }
 
-                        addJavascriptInterface(
-                            CodexWebViewBridge(codexBridge),
-                            "CodexAndroidBridge"
-                        )
-
-                        webViewClient = object : android.webkit.WebViewClient() {
-                            override fun onPageFinished(view: WebView, url: String) {
-                                super.onPageFinished(view, url)
-                                view.evaluateJavascript(
-                                    "window.CODEX_WS_PORT = $wsPort;" +
-                                    "window.WS_PORT = $wsPort;" +
-                                    "window.onCodexWsPortUpdate && window.onCodexWsPortUpdate($wsPort);",
-                                    null
-                                )
-                                if (isRunning) {
-                                    view.evaluateJavascript(
-                                        "window.connectWebSocket && window.connectWebSocket();",
-                                        null
-                                    )
-                                }
-                            }
-                        }
-
-                        loadUrl("file:///android_asset/web/codex-ui.html")
-                    }
-                },
-                modifier = Modifier.fillMaxSize()
+            // WebView (always created, visibility controlled by alpha)
+            WebViewContainer(
+                codexBridge = codexBridge,
+                wsPort = wsPort,
+                isRunning = isRunning,
+                onWebViewReady = onWebViewReady,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .then(
+                        if (isRunning || isWsConnected) Modifier
+                        else Modifier.alpha(0f)
+                    )
             )
+        }
 
-            // 底部启动按钮
-            if (!isRunning && runtimeState != RuntimeState.STARTING && runtimeState != RuntimeState.DOWNLOADING) {
+        // Bottom status bar
+        AgentStatusBar(
+            state = runtimeState,
+            isConnected = isWsConnected
+        )
+    }
+}
+
+/**
+ * Placeholder shown when Codex is not running.
+ */
+@Composable
+private fun StartPlaceholder(
+    runtimeState: RuntimeState,
+    onToggleRuntime: () -> Unit
+) {
+    Box(
+        modifier = Modifier.fillMaxSize(),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            if (runtimeState == RuntimeState.STOPPED) {
+                // Welcome / start prompt
+                Surface(
+                    shape = CircleShape,
+                    color = CodexPrimary.copy(alpha = 0.1f),
+                    modifier = Modifier.size(80.dp)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Text(
+                            "Cx",
+                            fontSize = 28.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = CodexPrimary
+                        )
+                    }
+                }
+                Spacer(Modifier.height(16.dp))
+                Text(
+                    "Codex Android",
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onBackground
+                )
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "AI 编码代理 · 安卓原生",
+                    fontSize = 14.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.height(32.dp))
                 Button(
                     onClick = onToggleRuntime,
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .padding(16.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.primary
-                    )
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = CodexPrimary),
+                    contentPadding = PaddingValues(horizontal = 32.dp, vertical = 14.dp)
                 ) {
-                    Icon(Icons.Default.PlayArrow, null)
-                    Spacer(Modifier.width(6.dp))
-                    Text("启动 Codex")
+                    Icon(Icons.Filled.PlayArrow, contentDescription = null, modifier = Modifier.size(20.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("启动 Codex", fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                }
+            } else if (runtimeState == RuntimeState.DOWNLOADING) {
+                CircularProgressIndicator(color = CodexPrimary, modifier = Modifier.size(48.dp))
+                Spacer(Modifier.height(16.dp))
+                Text("下载 Codex CLI...", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            } else if (runtimeState == RuntimeState.EXTRACTING) {
+                CircularProgressIndicator(color = CodexPrimary, modifier = Modifier.size(48.dp))
+                Spacer(Modifier.height(16.dp))
+                Text("解压 Codex 二进制...", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            } else if (runtimeState == RuntimeState.STARTING) {
+                CircularProgressIndicator(color = CodexPrimary, modifier = Modifier.size(48.dp))
+                Spacer(Modifier.height(16.dp))
+                Text("正在启动 Codex...", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            } else if (runtimeState == RuntimeState.ERROR) {
+                Icon(
+                    Icons.Filled.ErrorOutline,
+                    contentDescription = null,
+                    tint = StatusError,
+                    modifier = Modifier.size(48.dp)
+                )
+                Spacer(Modifier.height(16.dp))
+                Text("启动失败", fontSize = 16.sp, color = StatusError)
+                Spacer(Modifier.height(8.dp))
+                OutlinedButton(onClick = onToggleRuntime) {
+                    Text("重试")
                 }
             }
         }
@@ -162,8 +198,239 @@ fun WorkspaceScreen(
 }
 
 /**
- * WebView JavaScript 桥接接口。
- * 注册为 `window.CodexAndroidBridge`，供前端 JS 调用。
+ * WebView wrapper that handles proper initialization.
+ */
+@Composable
+private fun WebViewContainer(
+    codexBridge: CodexBridge?,
+    wsPort: Int,
+    isRunning: Boolean,
+    onWebViewReady: ((android.webkit.WebView) -> Unit)? = null,
+    modifier: Modifier = Modifier
+) {
+    AndroidView(
+        factory = { ctx ->
+            WebView(ctx).apply {
+                settings.javaScriptEnabled = true
+                settings.domStorageEnabled = true
+                settings.allowFileAccess = true
+                settings.loadWithOverviewMode = true
+                settings.useWideViewPort = true
+                settings.builtInZoomControls = false
+                settings.mediaPlaybackRequiresUserGesture = false
+
+                addJavascriptInterface(
+                    CodexWebViewBridge(codexBridge),
+                    "CodexAndroidBridge"
+                )
+
+                webViewClient = object : android.webkit.WebViewClient() {
+                    override fun onPageFinished(view: WebView, url: String) {
+                        super.onPageFinished(view, url)
+                        view.evaluateJavascript(
+                            "window.CODEX_WS_PORT = $wsPort;" +
+                            "window.WS_PORT = $wsPort;" +
+                            "window.onCodexWsPortUpdate && window.onCodexWsPortUpdate($wsPort);",
+                            null
+                        )
+                        if (isRunning) {
+                            view.evaluateJavascript(
+                                "window.connectWebSocket && window.connectWebSocket();",
+                                null
+                            )
+                        }
+                    }
+                }
+
+                loadUrl("file:///android_asset/web/codex-ui.html")
+
+                // Expose WebView reference for status forwarding
+                onWebViewReady?.invoke(this)
+            }
+        },
+        modifier = modifier
+    )
+}
+
+/**
+ * Top action bar with Replit-inspired design.
+ * Uses proper touch targets (>=40dp) and background to ensure clickability.
+ */
+@Composable
+private fun WorkspaceTopBar(
+    isRunning: Boolean,
+    isStarting: Boolean,
+    hasError: Boolean,
+    runtimeState: RuntimeState,
+    onToggleRuntime: () -> Unit,
+    onOpenGitHub: () -> Unit,
+    onOpenSkills: () -> Unit,
+    onOpenMCP: () -> Unit,
+    onOpenDevEnv: () -> Unit,
+    onOpenDiagnostic: () -> Unit,
+    onOpenSettings: () -> Unit,
+    onOpenFileBrowser: (() -> Unit)?,
+    onOpenAbout: (() -> Unit)?
+) {
+    var showMenu by remember { mutableStateOf(false) }
+
+    Surface(
+        color = MaterialTheme.colorScheme.surface,
+        tonalElevation = 2.dp,
+        shadowElevation = 1.dp,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .statusBarsPadding()
+                .padding(horizontal = 8.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Logo + Title
+            Surface(
+                shape = RoundedCornerShape(8.dp),
+                color = CodexPrimary.copy(alpha = 0.15f),
+                modifier = Modifier.size(34.dp)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Text(
+                        "Cx",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = CodexPrimary
+                    )
+                }
+            }
+            Spacer(Modifier.width(8.dp))
+            Text(
+                "Codex",
+                fontSize = 15.sp,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onBackground
+            )
+
+            // Status dot
+            if (isRunning) {
+                Spacer(Modifier.width(6.dp))
+                Box(
+                    modifier = Modifier
+                        .size(8.dp)
+                        .clip(CircleShape)
+                        .background(StatusOnline)
+                )
+            } else if (isStarting) {
+                Spacer(Modifier.width(6.dp))
+                Box(
+                    modifier = Modifier
+                        .size(8.dp)
+                        .clip(CircleShape)
+                        .background(StatusWarning)
+                )
+            } else if (hasError) {
+                Spacer(Modifier.width(6.dp))
+                Box(
+                    modifier = Modifier
+                        .size(8.dp)
+                        .clip(CircleShape)
+                        .background(StatusError)
+                )
+            }
+
+            Spacer(Modifier.weight(1f))
+
+            // Action buttons (always visible, but some only active when running)
+            // GitHub button
+            IconButton(
+                onClick = onOpenGitHub,
+                enabled = isRunning
+            ) {
+                Icon(
+                    Icons.Outlined.Code,
+                    contentDescription = "GitHub",
+                    tint = if (isRunning) MaterialTheme.colorScheme.onSurfaceVariant
+                           else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
+                )
+            }
+
+            // MCP button
+            IconButton(
+                onClick = onOpenMCP,
+                enabled = isRunning
+            ) {
+                Icon(
+                    Icons.Outlined.Memory,
+                    contentDescription = "MCP",
+                    tint = if (isRunning) MaterialTheme.colorScheme.onSurfaceVariant
+                           else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
+                )
+            }
+
+            // Start/Stop button
+            IconButton(
+                onClick = onToggleRuntime
+            ) {
+                Icon(
+                    if (isRunning) Icons.Filled.Stop else Icons.Filled.PlayArrow,
+                    contentDescription = if (isRunning) "停止" else "启动",
+                    tint = if (isRunning) StatusOnline else CodexPrimary
+                )
+            }
+
+            // More menu
+            Box {
+                IconButton(
+                    onClick = { showMenu = true }
+                ) {
+                    Icon(
+                        Icons.Outlined.MoreVert,
+                        contentDescription = "更多"
+                    )
+                }
+
+                DropdownMenu(
+                    expanded = showMenu,
+                    onDismissRequest = { showMenu = false },
+                    modifier = Modifier.background(CodexSurface)
+                ) {
+                    DropdownMenuItem(
+                        text = { Text("文件浏览器", fontSize = 14.sp) },
+                        onClick = { showMenu = false; onOpenFileBrowser?.invoke() },
+                        leadingIcon = { Icon(Icons.Outlined.Folder, null, modifier = Modifier.size(18.dp)) }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Skills 插件", fontSize = 14.sp) },
+                        onClick = { showMenu = false; onOpenSkills() },
+                        leadingIcon = { Icon(Icons.Outlined.Extension, null, modifier = Modifier.size(18.dp)) }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("开发环境", fontSize = 14.sp) },
+                        onClick = { showMenu = false; onOpenDevEnv() },
+                        leadingIcon = { Icon(Icons.Outlined.Build, null, modifier = Modifier.size(18.dp)) }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("诊断检查", fontSize = 14.sp) },
+                        onClick = { showMenu = false; onOpenDiagnostic() },
+                        leadingIcon = { Icon(Icons.Outlined.BugReport, null, modifier = Modifier.size(18.dp)) }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("设置", fontSize = 14.sp) },
+                        onClick = { showMenu = false; onOpenSettings() },
+                        leadingIcon = { Icon(Icons.Outlined.Settings, null, modifier = Modifier.size(18.dp)) }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("关于", fontSize = 14.sp) },
+                        onClick = { showMenu = false; onOpenAbout?.invoke() },
+                        leadingIcon = { Icon(Icons.Outlined.Info, null, modifier = Modifier.size(18.dp)) }
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * WebView JavaScript bridge interface.
  */
 class CodexWebViewBridge(
     private val codexBridge: CodexBridge?
@@ -172,14 +439,14 @@ class CodexWebViewBridge(
         private const val TAG = "CodexWebViewBridge"
     }
 
-    @JavascriptInterface
+    @android.webkit.JavascriptInterface
     fun isCodexReady(): Boolean {
         return codexBridge?.connectionState?.value == CodexBridge.ConnectionState.CONNECTED
     }
 
-    @JavascriptInterface
+    @android.webkit.JavascriptInterface
     fun postMessage(jsonMessage: String) {
-        Log.d(TAG, "JS -> Bridge: $jsonMessage")
+        android.util.Log.d(TAG, "JS -> Bridge: $jsonMessage")
         codexBridge?.let { bridge ->
             try {
                 val msg = org.json.JSONObject(jsonMessage)
@@ -188,14 +455,14 @@ class CodexWebViewBridge(
                     "disconnect" -> bridge.disconnect()
                 }
             } catch (e: Exception) {
-                Log.e(TAG, "JS message parse error", e)
+                android.util.Log.e(TAG, "JS message parse error", e)
             }
         }
     }
 }
 
 /**
- * 将运行时状态转发到 WebView JS。
+ * Forward runtime status to WebView JS.
  */
 fun forwardStatusToWebView(
     webView: WebView?,
@@ -217,18 +484,7 @@ fun forwardStatusToWebView(
                 )
             }
         } catch (e: Exception) {
-            android.util.Log.e("forwardStatusToWebView", "JS 调用失败", e)
+            android.util.Log.e("forwardStatusToWebView", "JS call failed", e)
         }
-    }
-}
-
-@Composable
-private fun ToolbarAction(
-    icon: ImageVector,
-    label: String,
-    onClick: () -> Unit
-) {
-    IconButton(onClick = onClick) {
-        Icon(icon, label, tint = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }

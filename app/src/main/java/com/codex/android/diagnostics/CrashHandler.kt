@@ -158,33 +158,67 @@ class CrashHandler(private val context: Context) {
     }
 
     /**
-     * 导出最近的 logcat 日志
+     * 导出最近的 logcat 日志到公共 Downloads 目录。
+     * 用户可通过文件管理器在 Downloads/CodexLogs/ 找到。
      */
     fun exportLogcat(lines: Int = 500): File {
-        val dir = File(context.filesDir, LOG_DIR).also { it.mkdirs() }
         val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
-        val file = File(dir, "logcat_$timestamp.txt")
+        val fileName = "logcat_$timestamp.txt"
 
-        try {
+        // 获取 logcat 内容
+        val logContent = try {
             val process = Runtime.getRuntime().exec(arrayOf(
                 "logcat", "-d",
                 "-t", lines.toString(),
                 "-s", "CodexRuntimeService:V CodexActivity:V CodexBridge:V CodexWebViewBridge:V DevelopmentEnvironment:V DiagnosticsRunner:V chromium:V"
             ))
             val reader = java.io.BufferedReader(java.io.InputStreamReader(process.inputStream))
-            FileWriter(file).use { writer ->
-                var line: String?
-                while (reader.readLine().also { line = it } != null) {
-                    writer.write("$line\n")
-                }
-            }
-            process.waitFor()
+            reader.readText()
         } catch (e: Exception) {
-            FileWriter(file).use { writer ->
-                writer.write("导出 logcat 失败: ${e.message}")
+            "导出 logcat 失败: ${e.message}"
+        }
+
+        // 使用 MediaStore 保存到公共 Downloads (Android 10+)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            try {
+                val contentValues = android.content.ContentValues().apply {
+                    put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, fileName)
+                    put(android.provider.MediaStore.MediaColumns.MIME_TYPE, "text/plain")
+                    put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH, android.os.Environment.DIRECTORY_DOWNLOADS + "/CodexLogs")
+                }
+                val uri = context.contentResolver.insert(
+                    android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI,
+                    contentValues
+                )
+                if (uri != null) {
+                    context.contentResolver.openOutputStream(uri)?.use { output ->
+                        output.write(logContent.toByteArray(Charsets.UTF_8))
+                    }
+                    android.util.Log.i(TAG, "日志已导出: $fileName (MediaStore)")
+                }
+            } catch (e: Exception) {
+                android.util.Log.w(TAG, "MediaStore 导出失败", e)
             }
         }
 
+        // 保存到公共 Downloads 目录（兼容所有 Android 版本 / 无需 MediaStore 权限）
+        try {
+            val downloadsDir = android.os.Environment.getExternalStoragePublicDirectory(
+                android.os.Environment.DIRECTORY_DOWNLOADS
+            )
+            val codexLogDir = File(downloadsDir, "CodexLogs").also { it.mkdirs() }
+            val file = File(codexLogDir, fileName)
+            file.writeText(logContent)
+            android.util.Log.i(TAG, "日志已导出: " + file.absolutePath)
+            return file
+        } catch (e: Exception) {
+            android.util.Log.e(TAG, "导出到 Downloads 失败", e)
+        }
+
+        // 保底保存到 APP 内部目录（用户可通过 APP 内文件浏览器访问）
+        val dir = File(context.filesDir, LOG_DIR).also { it.mkdirs() }
+        val file = File(dir, fileName)
+        file.writeText(logContent)
         return file
     }
 }

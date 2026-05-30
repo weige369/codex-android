@@ -125,12 +125,11 @@ class CodexRuntimeService : Service() {
 
         try {
             // 检测运行环境
-            val envInfo = devEnv.getEnvironmentInfo()
             val useTermux = devEnv.detectTermux()
-            val useUbuntu = envInfo.hasUbuntu
+            val envInfo = if (useTermux) devEnv.getEnvironmentInfo() else DevelopmentEnvironment.EnvInfo()
 
             _runningMode = when {
-                useUbuntu -> "ubuntu"
+                envInfo.hasUbuntu -> "ubuntu"
                 useTermux -> "termux"
                 else -> "direct"
             }
@@ -138,13 +137,12 @@ class CodexRuntimeService : Service() {
                 when(_runningMode) {
                     "ubuntu" -> "Ubuntu proot"
                     "termux" -> "Termux"
-                    else -> "Android 原生"
+                    else -> "Android 原生 (自包含)"
                 }
             })")
 
             if (!useTermux) {
-                addLog("警告: Termux 未安装，Codex CLI 可能无法运行")
-                addLog("请安装 Termux: https://f-droid.org/packages/com.termux/")
+                addLog("使用自包含模式运行（无需 Termux）")
             }
 
             // 下载/验证二进制
@@ -208,7 +206,12 @@ class CodexRuntimeService : Service() {
 
             when (_runningMode) {
                 "ubuntu" -> startInUbuntu(envInfo)
-                "termux" -> startInTermux()
+                "termux" -> if (!devEnv.detectTermux()) {
+                    addLog("Termux 不可用，切换至自包含模式")
+                    startDirect()
+                } else {
+                    startInTermux()
+                }
                 else -> startDirect()
             }
 
@@ -276,24 +279,35 @@ class CodexRuntimeService : Service() {
      */
     private suspend fun startDirect() {
         addLog("尝试直接在 Android 上运行 Codex...")
+        addLog("警告: Codex 二进制为 musl 链接，Android 使用 bionic libc")
+        addLog("建议安装 Termux 获得完整 Linux 环境")
 
-        val pb = ProcessBuilder(
-            codexManager.codexBinary.absolutePath,
-            "exec-server",
-            "--port", _wsPort.toString(),
-            "--http-port", (_wsPort + 1).toString()
-        ).apply {
-            environment().putAll(mapOf(
-                "HOME" to codexManager.codexDir.absolutePath,
-                "XDG_CONFIG_HOME" to codexManager.getConfigDir().absolutePath,
-                "CODEX_CONFIG_DIR" to codexManager.getConfigDir().absolutePath,
-                "PATH" to (System.getenv("PATH") ?: "") + ":/system/bin:/system/xbin"
-            ))
-            directory(codexManager.workspaceDir)
+        // 检查二进制是否可执行（兼容性检查）
+        val binaryPath = codexManager.codexBinary.absolutePath
+        try {
+            // 通过 shell 运行以捕获错误
+            val pb = ProcessBuilder(
+                "/system/bin/sh", "-c",
+                "$binaryPath exec-server --port ${_wsPort} --http-port ${_wsPort.plus(1)} 2>&1"
+            ).apply {
+                environment().putAll(mapOf(
+                    "HOME" to codexManager.codexDir.absolutePath,
+                    "XDG_CONFIG_HOME" to codexManager.getConfigDir().absolutePath,
+                    "CODEX_CONFIG_DIR" to codexManager.getConfigDir().absolutePath,
+                    "PATH" to (System.getenv("PATH") ?: "") + ":/system/bin:/system/xbin"
+                ))
+                directory(codexManager.workspaceDir)
+            }
+
+            codexProcess = pb.start()
+            isRunning = true
+        } catch (e: Exception) {
+            addLog("启动 Codex 进程失败: ${e.message}")
+            addLog("请在环境页面安装 Termux + Ubuntu")
+            _state.value = RuntimeState.ERROR
+            updateNotification("启动失败: ${e.message}")
+            return
         }
-
-        codexProcess = pb.start()
-        isRunning = true
 
         serviceScope.launch {
             try {
@@ -312,6 +326,17 @@ class CodexRuntimeService : Service() {
             } catch (e: Exception) {
                 addLog("Codex 输出流已关闭: ${e.message}")
             }
+            
+            // 进程结束后检查退出码
+            try {
+                val exitCode = codexProcess?.waitFor() ?: -1
+                if (exitCode != 0 && _state.value != RuntimeState.RUNNING) {
+                    addLog("Codex 进程退出 (exit=$exitCode)")
+                    _state.value = RuntimeState.ERROR
+                    updateNotification("Codex 异常退出 (exit=$exitCode)")
+                    isRunning = false
+                }
+            } catch (_: Exception) {}
         }
     }
 
@@ -333,7 +358,10 @@ class CodexRuntimeService : Service() {
      */
     private suspend fun startCodexProcess(launchCmd: String, modeName: String) {
         addLog("安装 Codex 到 $modeName 环境...")
-        devEnv.installBinaryToTermux(codexManager.codexBinary, "codex")
+        val installOk = devEnv.installBinaryToTermux(codexManager.codexBinary, "codex")
+        if (!installOk) {
+            addLog("安装 Codex 到 Termux 失败，尝试直接启动...")
+        }
 
         codexProcess = devEnv.runInTermux(launchCmd)
         isRunning = true

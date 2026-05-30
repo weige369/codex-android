@@ -377,19 +377,27 @@ class DiagnosticsRunner(private val context: Context) {
             ))
         }
 
-        // 本地下载 URL 可达性
-        val downloadUrl = "https://github.com/openai/codex/releases/download/rust-v" + CodexManager.CODEX_VERSION + "/codex-aarch64-unknown-linux-musl.tar.gz"
-        val urlReachable = try {
-            val url = java.net.URL(downloadUrl)
-            val conn = url.openConnection() as java.net.HttpURLConnection
-            conn.connectTimeout = 5000
-            conn.setRequestProperty("User-Agent", "Codex-Android/1.0")
-            conn.responseCode in 200..399
-        } catch (e: Exception) { false }
+        // 下载源可达性（遍历所有镜像）
+        var anyMirrorReachable = false
+        var lastReachableUrl = ""
+        for (mirrorUrl in CodexManager.getAllDownloadUrls()) {
+            try {
+                val url = java.net.URL(mirrorUrl)
+                val conn = url.openConnection() as java.net.HttpURLConnection
+                conn.connectTimeout = 5000
+                conn.setRequestProperty("User-Agent", "Codex-Android/1.0")
+                if (conn.responseCode in 200..399) {
+                    anyMirrorReachable = true
+                    lastReachableUrl = mirrorUrl
+                    break
+                }
+            } catch (_: Exception) { }
+        }
         results.add(TestResult(
-            "Codex 下载源可达", urlReachable,
-            if (urlReachable) "GitHub Release 可访问" else "连接失败",
-            severity = if (urlReachable) Severity.INFO else Severity.WARNING
+            "Codex 下载源可达", anyMirrorReachable,
+            if (anyMirrorReachable) "镜像可达: $lastReachableUrl" else "连接失败（所有镜像不可达）",
+            severity = if (anyMirrorReachable) Severity.INFO else Severity.WARNING,
+            suggestion = if (!anyMirrorReachable) "请检查网络连接，或手动导入 Codex 二进制" else ""
         ))
 
         return results
@@ -404,9 +412,9 @@ class DiagnosticsRunner(private val context: Context) {
         val hasTermux = devEnv.detectTermux()
         results.add(TestResult(
             "Termux", hasTermux,
-            if (hasTermux) "已安装" else "未安装",
-            severity = if (hasTermux) Severity.INFO else Severity.WARNING,
-            suggestion = if (!hasTermux) "从 F-Droid 安装 Termux" else ""
+            if (hasTermux) "已安装 (可选)" else "未安装 (自包含模式)",
+            severity = Severity.INFO,
+            suggestion = if (!hasTermux) "可选安装 Termux 获得完整 Linux 环境" else ""
         ))
 
         if (hasTermux) {
@@ -414,20 +422,20 @@ class DiagnosticsRunner(private val context: Context) {
 
             results.add(TestResult(
                 "Node.js", envInfo.hasNodeJs,
-                if (envInfo.hasNodeJs) envInfo.nodeVersion else "未安装",
-                severity = if (envInfo.hasNodeJs) Severity.INFO else Severity.WARNING,
-                suggestion = if (!envInfo.hasNodeJs) "在'环境'页面安装开发工具" else ""
+                if (envInfo.hasNodeJs) envInfo.nodeVersion else "未安装 (可选)",
+                severity = Severity.INFO,
+                suggestion = if (!envInfo.hasNodeJs) "安装 Termux 后可安装 Node.js" else ""
             ))
             results.add(TestResult(
                 "Python", envInfo.hasPython,
-                if (envInfo.hasPython) envInfo.pythonVersion else "未安装",
-                severity = if (envInfo.hasPython) Severity.INFO else Severity.WARNING,
-                suggestion = if (!envInfo.hasPython) "在'环境'页面安装开发工具" else ""
+                if (envInfo.hasPython) envInfo.pythonVersion else "未安装 (可选)",
+                severity = Severity.INFO,
+                suggestion = if (!envInfo.hasPython) "安装 Termux 后可安装 Python" else ""
             ))
             results.add(TestResult(
                 "Git", envInfo.hasGit,
-                if (envInfo.hasGit) envInfo.gitVersion else "未安装",
-                severity = if (envInfo.hasGit) Severity.INFO else Severity.WARNING
+                if (envInfo.hasGit) envInfo.gitVersion else "未安装 (可选)",
+                severity = Severity.INFO
             ))
             results.add(TestResult(
                 "Ubuntu (proot-distro)", envInfo.hasUbuntu,

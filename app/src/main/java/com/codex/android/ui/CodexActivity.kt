@@ -9,39 +9,44 @@ import android.os.Bundle
 import android.util.Log
 import android.webkit.WebView
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.lifecycle.lifecycleScope
-import androidx.compose.foundation.isSystemInDarkTheme
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
-import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.lightColorScheme
-import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.animation.*
+import androidx.compose.foundation.layout.*
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.outlined.*
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.ComposeView
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.core.view.WindowCompat
-import androidx.core.view.WindowInsetsCompat
-import androidx.core.view.WindowInsetsControllerCompat
+import androidx.lifecycle.lifecycleScope
 import com.codex.android.bridge.CodexBridge
 import com.codex.android.codex.CodexManager
 import com.codex.android.service.CodexNotifications
 import com.codex.android.service.CodexRuntimeService
 import com.codex.android.service.RuntimeState
 import com.codex.android.ui.about.AboutScreen
-import com.codex.android.ui.environment.DevEnvironmentScreen
 import com.codex.android.ui.diagnostics.DiagnosticsScreen
+import com.codex.android.ui.environment.DevEnvironmentScreen
 import com.codex.android.ui.files.FileBrowserScreen
 import com.codex.android.ui.github.GitHubImportScreen
 import com.codex.android.ui.mcp.CodexMCPScreen
 import com.codex.android.ui.settings.CodexSettingsScreen
 import com.codex.android.ui.skills.CodexSkillsScreen
+import com.codex.android.ui.theme.CodexTheme
+import com.codex.android.ui.theme.BottomNavBackground
+import com.codex.android.ui.theme.BottomNavInactive
+import com.codex.android.ui.theme.CodexPrimary
 import com.codex.android.ui.workspace.WorkspaceScreen
 import com.codex.android.ui.workspace.forwardStatusToWebView
 import com.codex.android.util.AndroidShellExecutor
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 
@@ -54,18 +59,18 @@ class CodexActivity : ComponentActivity() {
     val codexManager by lazy { CodexManager(this) }
     val codexBridge by lazy { CodexBridge("ws://127.0.0.1:${CodexRuntimeService.DEFAULT_WS_PORT}") }
 
-    private var _runtimeState = RuntimeState.STOPPED
-    private var _wsPort = CodexRuntimeService.DEFAULT_WS_PORT
-    private var _isRuntimeRunning = false
-    private var _wsConnected = false
-    // Compose 响应式状态（由 BroadcastReceiver 更新，Compose 读取）
+    // Compose reactive state
     private val _currentScreen = mutableStateOf<Screen>(Screen.Workspace)
     private val _runtimeStateFlow = mutableStateOf(RuntimeState.STOPPED)
     private val _wsPortFlow = mutableIntStateOf(CodexRuntimeService.DEFAULT_WS_PORT)
     private val _isRunningFlow = mutableStateOf(false)
+    private val _wsConnectedFlow = mutableStateOf(false)
 
-    // WebView 引用，用于状态转发
+    // WebView reference
     private var _webView: WebView? = null
+
+    // Selected bottom nav item
+    private val _selectedNavItem = mutableIntStateOf(0)
 
     sealed class Screen {
         data object Workspace : Screen()
@@ -79,6 +84,20 @@ class CodexActivity : ComponentActivity() {
         data object About : Screen()
     }
 
+    data class BottomNavItem(
+        val title: String,
+        val selectedIcon: ImageVector,
+        val unselectedIcon: ImageVector,
+        val screen: Screen
+    )
+
+    private val bottomNavItems = listOf(
+        BottomNavItem("终端", Icons.Filled.Terminal, Icons.Outlined.Terminal, Screen.Workspace),
+        BottomNavItem("文件", Icons.Filled.Folder, Icons.Outlined.Folder, Screen.FileBrowser),
+        BottomNavItem("环境", Icons.Filled.Build, Icons.Outlined.Build, Screen.DevEnvironment),
+        BottomNavItem("设置", Icons.Filled.Settings, Icons.Outlined.Settings, Screen.Settings),
+    )
+
     private val notificationPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
@@ -91,29 +110,27 @@ class CodexActivity : ComponentActivity() {
             val port = intent.getIntExtra("wsPort", CodexRuntimeService.DEFAULT_WS_PORT)
             val running = intent.getBooleanExtra("isRunning", false)
 
-            _wsPort = port
-            _isRuntimeRunning = running
-            _runtimeState = try {
+            val runtimeState = try {
                 RuntimeState.valueOf(state)
             } catch (e: Exception) {
                 RuntimeState.ERROR
             }
             Log.i(TAG, "Codex 状态: $state (端口: $port, 运行: $running)")
 
-            // 转发状态到 WebView
-            forwardStatusToWebView(_webView, _runtimeState, _wsPort, _isRuntimeRunning)
+            // Forward state to WebView
+            forwardStatusToWebView(_webView, runtimeState, port, running)
 
-            // 如果运行时已启动，连接桥接器
-            if (_runtimeState == RuntimeState.RUNNING) {
+            // Connect bridge when running
+            if (runtimeState == RuntimeState.RUNNING) {
                 if (codexBridge.connectionState.value != CodexBridge.ConnectionState.CONNECTED) {
                     codexBridge.connect()
                 }
             }
 
-            // 更新 Compose 响应式状态
-            _runtimeStateFlow.value = _runtimeState
-            _wsPortFlow.intValue = _wsPort
-            _isRunningFlow.value = _isRuntimeRunning
+            // Update Compose state
+            _runtimeStateFlow.value = runtimeState
+            _wsPortFlow.intValue = port
+            _isRunningFlow.value = running
         }
     }
 
@@ -121,104 +138,266 @@ class CodexActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
-        // 初始化 Shell 执行器和开发环境
+        // Initialize shell executor
         AndroidShellExecutor.init(this)
 
-        WindowCompat.setDecorFitsSystemWindows(window, false)
-        val controller = WindowInsetsControllerCompat(window, window.decorView)
-        controller.hide(WindowInsetsCompat.Type.systemBars())
-        controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-
-        registerReceiver(
-            statusReceiver,
-            IntentFilter("com.codex.android.CODEX_STATUS"),
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) RECEIVER_NOT_EXPORTED else 0
-        )
-
+        // Create notification channel
         CodexNotifications.createChannels(this)
+
+        // Request notification permission on Android 13+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             notificationPermissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
         }
 
-        CodexRuntimeService.start(this)
+        // Register runtime status broadcast receiver
+        val receiverFlags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) RECEIVER_EXPORTED else 0
+        registerReceiver(statusReceiver, IntentFilter("com.codex.android.CODEX_STATUS"), receiverFlags)
 
-        setContentView(ComposeView(this).apply {
-            setContent {
-                val colorScheme = if (isSystemInDarkTheme()) darkColorScheme() else lightColorScheme()
-                MaterialTheme(colorScheme = colorScheme) {
-                    Surface(
-                        modifier = Modifier.fillMaxSize(),
-                        color = MaterialTheme.colorScheme.background
+        // Observe runtime state from service
+        lifecycleScope.launch {
+            CodexRuntimeService.state.collect { state ->
+                _runtimeStateFlow.value = state
+            }
+        }
+
+        handleSendIntent(intent)
+
+        setContent {
+            CodexTheme {
+                val screen by _currentScreen
+                val runtimeState by _runtimeStateFlow
+                val wsPort by _wsPortFlow
+                val isRunning by _isRunningFlow
+                val wsConnected by _wsConnectedFlow
+                val selectedNav by _selectedNavItem
+
+                var showMoreMenu by remember { mutableStateOf(false) }
+
+                Scaffold(
+                    modifier = Modifier.fillMaxSize(),
+                    bottomBar = {
+                        // Check if we should show bottom nav (not in full-screen subscreens)
+                        val showBottomNav = screen in listOf(
+                            Screen.Workspace,
+                            Screen.FileBrowser,
+                            Screen.DevEnvironment,
+                            Screen.Settings
+                        )
+
+                        AnimatedVisibility(
+                            visible = showBottomNav,
+                            enter = slideInVertically(initialOffsetY = { it }),
+                            exit = slideOutVertically(targetOffsetY = { it })
+                        ) {
+                            NavigationBar(
+                                containerColor = BottomNavBackground,
+                                tonalElevation = 0.dp,
+                            ) {
+                                bottomNavItems.forEachIndexed { index, item ->
+                                    NavigationBarItem(
+                                        selected = selectedNav == index,
+                                        onClick = {
+                                            _selectedNavItem.intValue = index
+                                            navigateTo(item.screen)
+                                        },
+                                        icon = {
+                                            Icon(
+                                                imageVector = if (selectedNav == index) item.selectedIcon else item.unselectedIcon,
+                                                contentDescription = item.title,
+                                                modifier = Modifier.size(24.dp)
+                                            )
+                                        },
+                                        label = {
+                                            Text(
+                                                item.title,
+                                                fontSize = 11.sp,
+                                                fontWeight = if (selectedNav == index) FontWeight.SemiBold else FontWeight.Normal
+                                            )
+                                        },
+                                        colors = NavigationBarItemDefaults.colors(
+                                            selectedIconColor = CodexPrimary,
+                                            selectedTextColor = CodexPrimary,
+                                            unselectedIconColor = BottomNavInactive,
+                                            unselectedTextColor = BottomNavInactive,
+                                            indicatorColor = CodexPrimary.copy(alpha = 0.12f)
+                                        )
+                                    )
+                                }
+
+                                // "More" button for overflow items
+                                NavigationBarItem(
+                                    selected = false,
+                                    onClick = { showMoreMenu = true },
+                                    icon = {
+                                        Icon(
+                                            Icons.Outlined.MoreHoriz,
+                                            contentDescription = "更多",
+                                            modifier = Modifier.size(24.dp)
+                                        )
+                                    },
+                                    label = {
+                                        Text("更多", fontSize = 11.sp)
+                                    },
+                                    colors = NavigationBarItemDefaults.colors(
+                                        unselectedIconColor = BottomNavInactive,
+                                        unselectedTextColor = BottomNavInactive,
+                                    )
+                                )
+                            }
+                        }
+                    }
+                ) { padding ->
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(padding)
                     ) {
-                        val screen by _currentScreen
-                        var runtimeState by remember { mutableStateOf(_runtimeState) }
-                        var wsPort by remember { mutableIntStateOf(_wsPort) }
-                        var isRunning by remember { mutableStateOf(_isRuntimeRunning) }
-                        var wsConnected by remember { mutableStateOf(false) }
-
-                        // 状态来自 Activity 的响应式 StateFlow
-                        runtimeState = _runtimeStateFlow.value
-                        wsPort = _wsPortFlow.intValue
-                        isRunning = _isRunningFlow.value
-                        wsConnected = codexBridge.connectionState.value == CodexBridge.ConnectionState.CONNECTED
-
-                        when (screen) {
-                            Screen.Workspace -> {
-                                WorkspaceScreen(
+                        AnimatedContent(
+                            targetState = screen,
+                            transitionSpec = {
+                                fadeIn() + slideInHorizontally { it / 4 } togetherWith
+                                fadeOut() + slideOutHorizontally { -it / 4 }
+                            },
+                            label = "screenTransition"
+                        ) { currentScreen ->
+                            when (currentScreen) {
+                                Screen.Workspace -> WorkspaceScreen(
                                     codexManager = codexManager,
                                     runtimeState = runtimeState,
                                     isWsConnected = wsConnected,
                                     workspacePath = codexManager.workspaceDir.absolutePath,
                                     wsPort = wsPort,
                                     codexBridge = codexBridge,
+                                    onWebViewReady = { webView -> _webView = webView },
                                     onOpenSettings = { navigateTo(Screen.Settings) },
                                     onOpenSkills = { navigateTo(Screen.Skills) },
                                     onOpenMCP = { navigateTo(Screen.MCP) },
                                     onOpenGitHub = { navigateTo(Screen.GitHubImport) },
                                     onOpenDevEnv = { navigateTo(Screen.DevEnvironment) },
                                     onOpenDiagnostic = { navigateTo(Screen.Diagnostic) },
+                                    onOpenFileBrowser = { navigateTo(Screen.FileBrowser) },
+                                    onOpenAbout = { navigateTo(Screen.About) },
                                     onToggleRuntime = {
                                         if (isRunning) {
                                             CodexRuntimeService.stop(this@CodexActivity)
-                                            wsConnected = false
                                         } else {
                                             CodexRuntimeService.start(this@CodexActivity)
                                         }
                                     },
                                     onExportFile = { path ->
                                         exportWorkspaceToDownloads(path)
-                                    },
-                                    onOpenFileBrowser = { navigateTo(Screen.FileBrowser) },
+                                    }
+                                )
+                                Screen.FileBrowser -> FileBrowserScreen(
+                                    workspacePath = codexManager.workspaceDir.absolutePath,
+                                    onBack = { navigateTo(Screen.Workspace) }
+                                )
+                                Screen.DevEnvironment -> DevEnvironmentScreen(
+                                    onBack = { navigateTo(Screen.Workspace) }
+                                )
+                                Screen.Settings -> CodexSettingsScreen(
+                                    onBack = { navigateTo(Screen.Workspace) },
+                                    onOpenSkills = { navigateTo(Screen.Skills) },
+                                    onOpenMCP = { navigateTo(Screen.MCP) },
+                                    onOpenGitHub = { navigateTo(Screen.GitHubImport) },
+                                    onOpenDiagnostic = { navigateTo(Screen.Diagnostic) },
                                     onOpenAbout = { navigateTo(Screen.About) }
                                 )
+                                Screen.Skills -> CodexSkillsScreen(
+                                    onBack = { navigateTo(Screen.Settings) }
+                                )
+                                Screen.MCP -> CodexMCPScreen(
+                                    onBack = { navigateTo(Screen.Settings) }
+                                )
+                                Screen.GitHubImport -> GitHubImportScreen(
+                                    workspaceDir = codexManager.workspaceDir.absolutePath,
+                                    onBack = { navigateTo(Screen.Workspace) }
+                                )
+                                Screen.Diagnostic -> DiagnosticsScreen(
+                                    onBack = { navigateTo(Screen.Settings) }
+                                )
+                                Screen.About -> AboutScreen(
+                                    onBack = { navigateTo(Screen.Settings) }
+                                )
                             }
-                            Screen.Settings -> CodexSettingsScreen(onBack = { navigateTo(Screen.Workspace) })
-                            Screen.Skills -> CodexSkillsScreen(onBack = { navigateTo(Screen.Workspace) })
-                            Screen.MCP -> CodexMCPScreen(onBack = { navigateTo(Screen.Workspace) })
-                            Screen.GitHubImport -> GitHubImportScreen(
-                                workspaceDir = codexManager.workspaceDir.absolutePath,
-                                onBack = { navigateTo(Screen.Workspace) }
-                            )
-                            Screen.FileBrowser -> FileBrowserScreen(
-                                workspacePath = codexManager.workspaceDir.absolutePath,
-                                onBack = { navigateTo(Screen.Workspace) }
-                            )
-                            Screen.DevEnvironment -> DevEnvironmentScreen(
-                                onBack = { navigateTo(Screen.Workspace) }
-                            )
-                            Screen.Diagnostic -> DiagnosticsScreen(
-                                onBack = { navigateTo(Screen.Workspace) }
-                            )
-                            Screen.About -> AboutScreen(onBack = { navigateTo(Screen.Workspace) })
                         }
                     }
                 }
+
+                // More menu dialog
+                if (showMoreMenu) {
+                    AlertDialog(
+                        onDismissRequest = { showMoreMenu = false },
+                        title = {
+                            Text("更多功能", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                        },
+                        text = {
+                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                MoreMenuItem(
+                                    icon = Icons.Default.Extension,
+                                    title = "Skills",
+                                    desc = "管理 Codex 插件",
+                                    onClick = {
+                                        showMoreMenu = false
+                                        navigateTo(Screen.Skills)
+                                    }
+                                )
+                                MoreMenuItem(
+                                    icon = Icons.Default.Memory,
+                                    title = "MCP 服务器",
+                                    desc = "Android 系统工具集成",
+                                    onClick = {
+                                        showMoreMenu = false
+                                        navigateTo(Screen.MCP)
+                                    }
+                                )
+                                MoreMenuItem(
+                                    icon = Icons.Default.Code,
+                                    title = "GitHub 导入",
+                                    desc = "从 GitHub 导入仓库",
+                                    onClick = {
+                                        showMoreMenu = false
+                                        navigateTo(Screen.GitHubImport)
+                                    }
+                                )
+                                MoreMenuItem(
+                                    icon = Icons.Default.BugReport,
+                                    title = "诊断检查",
+                                    desc = "运行设备诊断",
+                                    onClick = {
+                                        showMoreMenu = false
+                                        navigateTo(Screen.Diagnostic)
+                                    }
+                                )
+                                MoreMenuItem(
+                                    icon = Icons.Default.Info,
+                                    title = "关于",
+                                    desc = "版本和系统信息",
+                                    onClick = {
+                                        showMoreMenu = false
+                                        navigateTo(Screen.About)
+                                    }
+                                )
+                            }
+                        },
+                        confirmButton = {
+                            TextButton(onClick = { showMoreMenu = false }) {
+                                Text("关闭")
+                            }
+                        }
+                    )
+                }
             }
-        })
+        }
     }
 
     private fun navigateTo(screen: Screen) {
         _currentScreen.value = screen
+        // Update selected nav index if it's a bottom nav item
+        val navIndex = bottomNavItems.indexOfFirst { it.screen == screen }
+        if (navIndex >= 0) {
+            _selectedNavItem.intValue = navIndex
+        }
     }
 
     fun setWebViewRef(webView: WebView?) {
@@ -269,13 +448,12 @@ class CodexActivity : ComponentActivity() {
             val sharedText = intent.getStringExtra(Intent.EXTRA_TEXT) ?: return
             val sharedSubject = intent.getStringExtra(Intent.EXTRA_SUBJECT) ?: ""
             Log.i(TAG, "收到分享文本: $sharedSubject - ${sharedText.take(100)}")
-            
-            // 将分享文本设置到 WebView
+
             _webView?.post {
                 val jsCode = "window.onSharedText && window.onSharedText(${org.json.JSONObject.quote(sharedText)}, ${org.json.JSONObject.quote(sharedSubject)});"
                 _webView?.evaluateJavascript(jsCode, null)
             }
-            
+
             android.widget.Toast.makeText(this, "文本已分享到 Codex", android.widget.Toast.LENGTH_SHORT).show()
         }
     }
@@ -284,5 +462,43 @@ class CodexActivity : ComponentActivity() {
         super.onDestroy()
         try { unregisterReceiver(statusReceiver) } catch (_: Exception) {}
         codexBridge.destroy()
+    }
+}
+
+@Composable
+private fun MoreMenuItem(
+    icon: ImageVector,
+    title: String,
+    desc: String,
+    onClick: () -> Unit
+) {
+    Surface(
+        onClick = onClick,
+        shape = MaterialTheme.shapes.medium,
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier.padding(12.dp),
+            verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+        ) {
+            Icon(
+                icon,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(24.dp)
+            )
+            Spacer(Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(title, fontWeight = FontWeight.Medium, fontSize = 15.sp)
+                Text(desc, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Icon(
+                Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(20.dp)
+            )
+        }
     }
 }

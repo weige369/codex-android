@@ -18,20 +18,14 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.codex.android.service.CodexRuntimeService
 import com.codex.android.service.RuntimeState
+import com.codex.android.ui.theme.*
 
 /**
- * Agent 运行状态指示器。
- *
- * 参考 Replit 的 AgentStatusAppCard 设计，提供：
- * - 脉冲动画状态灯（断连/连接中/运行中/错误）
- * - 状态文本
- * - 进度/消息显示
- * - 点击展开详情
+ * Modern status bar inspired by Replit.
+ * Shows runtime state with animated indicator and quick actions.
  */
 @Composable
 fun AgentStatusBar(
@@ -40,29 +34,28 @@ fun AgentStatusBar(
     onToggle: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
-    val infiniteTransition = rememberInfiniteTransition(label = "agentPulse")
+    val infiniteTransition = rememberInfiniteTransition(label = "statusPulse")
 
     val statusColor by animateColorAsState(
         targetValue = when (state) {
-            RuntimeState.RUNNING -> Color(0xFF2ED573)
+            RuntimeState.RUNNING -> StatusOnline
             RuntimeState.STARTING,
             RuntimeState.DOWNLOADING,
-            RuntimeState.EXTRACTING -> Color(0xFFF1A502)
-            RuntimeState.ERROR -> Color(0xFFFF4757)
-            RuntimeState.STOPPED -> Color(0xFF8888AA)
+            RuntimeState.EXTRACTING -> StatusWarning
+            RuntimeState.ERROR -> StatusError
+            RuntimeState.STOPPED -> StatusOffline
         },
-        label = "statusColor"
+        label = "statusColorAnim"
     )
 
-    // 脉冲动画 - 仅连接/运行中状态时脉冲
     val pulseScale by infiniteTransition.animateFloat(
         initialValue = 0.85f,
         targetValue = 1.0f,
         animationSpec = infiniteRepeatable(
-            animation = tween(1200, easing = EaseInOutCubic),
+            animation = tween(1200, easing = FastOutSlowInEasing),
             repeatMode = RepeatMode.Reverse
         ),
-        label = "pulseScale"
+        label = "pulseAnim"
     )
 
     val shouldPulse = state == RuntimeState.RUNNING
@@ -71,20 +64,21 @@ fun AgentStatusBar(
         modifier = modifier
             .fillMaxWidth()
             .clickable(onClick = onToggle),
-        shape = RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
-        tonalElevation = 1.dp
+        shape = RoundedCornerShape(topStart = 0.dp, topEnd = 0.dp),
+        color = MaterialTheme.colorScheme.surface,
+        tonalElevation = 2.dp,
+        shadowElevation = 4.dp
     ) {
         Row(
             modifier = Modifier
-                .padding(horizontal = 12.dp, vertical = 6.dp)
+                .padding(horizontal = 12.dp, vertical = 8.dp)
                 .fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // 状态灯
+            // Status dot with pulse
             Box(
                 modifier = Modifier
-                    .size(10.dp)
+                    .size(8.dp)
                     .clip(CircleShape)
                     .then(
                         if (shouldPulse) Modifier.scale(pulseScale) else Modifier
@@ -93,7 +87,7 @@ fun AgentStatusBar(
             )
             Spacer(Modifier.width(8.dp))
 
-            // 状态文本
+            // Status text
             Text(
                 text = statusText(state, isConnected),
                 fontSize = 12.sp,
@@ -103,28 +97,47 @@ fun AgentStatusBar(
 
             Spacer(Modifier.weight(1f))
 
-            // 子状态详情
-            if (isConnected) {
-                Surface(
-                    shape = RoundedCornerShape(4.dp),
-                    color = Color(0xFF2ED573).copy(alpha = 0.15f)
-                ) {
-                    Text(
-                        " 在线 ",
-                        fontSize = 10.sp,
-                        fontFamily = FontFamily.Monospace,
-                        color = Color(0xFF2ED573)
-                    )
-                }
-            } else {
-                Text(
-                    state.name.lowercase(),
-                    fontSize = 10.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    fontFamily = FontFamily.Monospace
-                )
-            }
+            // Badge / indicator
+            Badge(
+                state = state,
+                isConnected = isConnected
+            )
         }
+    }
+}
+
+@Composable
+private fun Badge(
+    state: RuntimeState,
+    isConnected: Boolean
+) {
+    val (text, bgColor, textColor) = when {
+        state == RuntimeState.RUNNING && isConnected ->
+            Triple("在线", StatusOnline.copy(alpha = 0.15f), StatusOnline)
+        state == RuntimeState.RUNNING ->
+            Triple("已启动", StatusWarning.copy(alpha = 0.15f), StatusWarning)
+        state == RuntimeState.ERROR ->
+            Triple("异常", StatusError.copy(alpha = 0.15f), StatusError)
+        state == RuntimeState.STARTING ->
+            Triple("启动中", StatusWarning.copy(alpha = 0.15f), StatusWarning)
+        state == RuntimeState.DOWNLOADING ->
+            Triple("下载中", StatusWarning.copy(alpha = 0.15f), StatusWarning)
+        else ->
+            Triple("已停止", StatusOffline.copy(alpha = 0.15f), StatusOffline)
+    }
+
+    Surface(
+        shape = RoundedCornerShape(6.dp),
+        color = bgColor
+    ) {
+        Text(
+            text = " $text ",
+            fontSize = 10.sp,
+            fontFamily = FontFamily.Monospace,
+            fontWeight = FontWeight.SemiBold,
+            color = textColor,
+            modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
+        )
     }
 }
 
@@ -140,7 +153,7 @@ private fun statusText(state: RuntimeState, connected: Boolean): String {
 }
 
 /**
- * Agent 功能按钮 - 浮动在输入框旁的快捷操作区。
+ * Quick action button for agent/terminal actions.
  */
 @Composable
 fun AgentActionButton(
@@ -168,7 +181,7 @@ fun AgentActionButton(
 }
 
 /**
- * 流式消息气泡 - 用于显示 Codex 正在生成的流式内容。
+ * Stream message bubble for Codex streaming content.
  */
 @Composable
 fun StreamBubble(
@@ -184,7 +197,7 @@ fun StreamBubble(
             modifier = Modifier.padding(12.dp),
             verticalAlignment = Alignment.Top
         ) {
-            // 打字光标
+            // Typing cursor
             Box(
                 modifier = Modifier
                     .padding(top = 4.dp)
@@ -206,4 +219,4 @@ fun StreamBubble(
     }
 }
 
-private val EaseInOutCubic: Easing = CubicBezierEasing(0.65f, 0f, 0.35f, 1f)
+private val FastOutSlowInEasing: Easing = CubicBezierEasing(0.4f, 0.0f, 0.2f, 1.0f)

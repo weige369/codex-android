@@ -319,10 +319,12 @@ export function ChatScreenContent({
               style={{ bottom: `${classicSettingsBottomOffset}px` }}
             >
               <ClassicChatSettingsBar
+                chatThemeId={viewModel.chatThemeId}
                 contextPercent={viewModel.contextStats.percent}
                 contextCurrentValue={viewModel.contextStats.currentValue}
                 contextMaxValue={viewModel.contextStats.maxValue}
                 inputSettings={viewModel.inputSettings}
+                onSelectChatTheme={viewModel.setChatThemeId}
                 memorySelector={viewModel.memorySelector}
                 modelSelector={viewModel.modelSelector}
                 modelSelectorLoading={viewModel.modelSelectorLoading}

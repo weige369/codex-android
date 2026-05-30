@@ -7,7 +7,10 @@ import { useChatViewModel } from '../viewmodel/ChatViewModel';
 export function AIChatScreen() {
   const viewModel = useChatViewModel();
   const fontFaceCss = buildChatFontFaceCss(viewModel.theme);
-  const chatThemeStyle = useMemo(() => buildChatThemeStyle(viewModel.theme), [viewModel.theme]);
+  const chatThemeStyle = useMemo(
+    () => buildChatThemeStyle(viewModel.theme, viewModel.chatThemeId),
+    [viewModel.theme, viewModel.chatThemeId]
+  );
   const backdropBaseStyle = useMemo(
     () => ({
       background: String(chatThemeStyle['--chat-root-background'] ?? 'transparent')
@@ -44,6 +47,7 @@ export function AIChatScreen() {
         viewModel.activeChatStyle === 'bubble' ? 'chat-style-bubble' : 'chat-style-cursor',
         viewModel.theme?.theme_mode === 'light' ? 'theme-light' : 'theme-dark'
       ].join(' ')}
+      data-theme={viewModel.chatThemeId}
       style={chatThemeStyle}
     >
       {fontFaceCss ? <style>{fontFaceCss}</style> : null}

@@ -32,8 +32,13 @@ import {
   readStoredToken,
   writeStoredToken
 } from '../util/ConfigurationStateHolder';
+import {
+  readStoredChatThemeId,
+  writeStoredChatThemeId
+} from '../util/ThemeStateHolder';
 import type {
   ChatStyle,
+  ChatThemeId,
   ContextStatsSnapshot,
   HistoryDisplayMode,
   InputProcessingStage,
@@ -461,6 +466,7 @@ export interface ChatViewModelState {
   autoSwitchChatOnCharacterSelect: boolean;
   inputSettings: WebInputSettingsState | null;
   memorySelector: WebMemorySelectorState | null;
+  chatThemeId: ChatThemeId;
 }
 
 export interface ChatViewModelActions {
@@ -495,6 +501,7 @@ export interface ChatViewModelActions {
   sendPendingQueueMessage: (id: number) => Promise<void>;
   setAutoScrollToBottom: (value: boolean) => void;
   setHistoryDisplayMode: (value: HistoryDisplayMode) => void;
+  setChatThemeId: (value: ChatThemeId) => void;
   setAutoSwitchCharacterCard: (value: boolean) => void;
   setAutoSwitchChatOnCharacterSelect: (value: boolean) => void;
   updateConversation: (
@@ -586,6 +593,7 @@ export function useChatViewModel(): ChatViewModel {
   );
   const [inputSettings, setInputSettings] = useState<WebInputSettingsState | null>(null);
   const [memorySelector, setMemorySelector] = useState<WebMemorySelectorState | null>(null);
+  const [chatThemeId, setChatThemeIdState] = useState<ChatThemeId>(readStoredChatThemeId);
   const streamAbortRef = useRef<AbortController | null>(null);
   const queueIdRef = useRef(1);
   const skipNextConversationLoadRef = useRef(false);
@@ -1291,6 +1299,11 @@ export function useChatViewModel(): ChatViewModel {
     writeStoredValue(HISTORY_DISPLAY_MODE_KEY, value);
   }
 
+  function setChatThemeId(value: ChatThemeId) {
+    setChatThemeIdState(value);
+    writeStoredChatThemeId(value);
+  }
+
   function setAutoSwitchCharacterCard(value: boolean) {
     setAutoSwitchCharacterCardState(value);
     writeStoredValue(AUTO_SWITCH_CHARACTER_CARD_KEY, String(value));
@@ -1631,6 +1644,7 @@ export function useChatViewModel(): ChatViewModel {
     autoSwitchChatOnCharacterSelect,
     inputSettings,
     memorySelector,
+    chatThemeId,
     setTokenDraft,
     submitToken,
     createConversation,
@@ -1658,6 +1672,7 @@ export function useChatViewModel(): ChatViewModel {
     sendPendingQueueMessage,
     setAutoScrollToBottom,
     setHistoryDisplayMode,
+    setChatThemeId,
     setAutoSwitchCharacterCard,
     setAutoSwitchChatOnCharacterSelect,
     updateConversation,

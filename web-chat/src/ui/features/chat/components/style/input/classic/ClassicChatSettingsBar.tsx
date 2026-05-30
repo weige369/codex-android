@@ -9,15 +9,18 @@ import {
   LockIcon,
   PersonIcon,
   SaveIcon,
+  ScreenshotMonitorIcon,
   TuneIcon
 } from '../../../../util/chatIcons';
 import type {
+  ChatThemeId,
   WebInputSettingsState,
   WebModelSelectorConfig,
   WebMemorySelectorState,
   WebModelSelectorState,
   WebSelectModelResponse
 } from '../../../../util/chatTypes';
+import { CHAT_THEME_OPTIONS } from '../../../../util/chatTheme';
 import { CharacterCardModelBindingSwitchConfirmDialog } from '../common/CharacterCardModelBindingSwitchConfirmDialog';
 
 type InfoContent = {
@@ -642,19 +645,85 @@ function ClassicInfoPopup({
   );
 }
 
+function ClassicThemePickerItem({
+  chatThemeId,
+  expanded,
+  onExpandedChange,
+  onInfoClick,
+  onSelectTheme
+}: {
+  chatThemeId: ChatThemeId;
+  expanded: boolean;
+  onExpandedChange: (value: boolean) => void;
+  onInfoClick: () => void;
+  onSelectTheme: (value: ChatThemeId) => void;
+}) {
+  const activeOption =
+    CHAT_THEME_OPTIONS.find((option) => option.id === chatThemeId) ?? CHAT_THEME_OPTIONS[0];
+
+  return (
+    <>
+      <ClassicSettingsRow onClick={() => onExpandedChange(!expanded)}>
+        <span className="classic-settings-popup-icon">
+          <ScreenshotMonitorIcon size={16} />
+        </span>
+        <ClassicInfoButton onClick={onInfoClick} />
+        <ClassicInfoSpacer />
+        <span className="classic-settings-popup-summary">
+          <strong>界面主题:</strong>
+          <span className="classic-settings-popup-summary-value">{activeOption.label}</span>
+        </span>
+        <span className="classic-settings-popup-chevron">
+          {expanded ? <ChevronUpIcon size={18} /> : <ChevronDownIcon size={18} />}
+        </span>
+      </ClassicSettingsRow>
+
+      {expanded ? (
+        <div className="classic-settings-expand-panel">
+          <div className="classic-theme-card-grid">
+            {CHAT_THEME_OPTIONS.map((option) => (
+              <button
+                key={option.id}
+                aria-pressed={option.id === chatThemeId}
+                className={`classic-theme-card ${option.id === chatThemeId ? 'is-active' : ''}`}
+                onClick={() => onSelectTheme(option.id)}
+                type="button"
+              >
+                <span
+                  aria-hidden="true"
+                  className="classic-theme-card-preview"
+                  data-theme-preview={option.id}
+                >
+                  <span className="classic-theme-card-bar" />
+                  <span className="classic-theme-card-bubble" />
+                </span>
+                <span className="classic-theme-card-label">{option.label}</span>
+                <span className="classic-theme-card-desc">{option.description}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : null}
+    </>
+  );
+}
+
 export function ClassicChatSettingsBar({
+  chatThemeId,
   inputSettings,
   memorySelector,
   modelSelector,
   modelSelectorLoading,
   onRunManualConversationSummary,
   onRunManualMemoryUpdate,
+  onSelectChatTheme,
   onSelectModelConfig,
   onSelectMemoryProfile,
   onToggleSettings,
   onUpdateInputSettings,
   settingsOpen
 }: {
+  chatThemeId: ChatThemeId;
   contextPercent: number;
   contextCurrentValue: number;
   contextMaxValue: number;
@@ -683,6 +752,7 @@ export function ClassicChatSettingsBar({
       permission_level: string;
     }>
   ) => Promise<void>;
+  onSelectChatTheme: (value: ChatThemeId) => void;
   onToggleSettings: () => void;
   settingsOpen: boolean;
 }) {
@@ -690,6 +760,7 @@ export function ClassicChatSettingsBar({
   const [showMemoryDropdown, setShowMemoryDropdown] = useState(false);
   const [showThinkingDropdown, setShowThinkingDropdown] = useState(false);
   const [showDisableSettingsDropdown, setShowDisableSettingsDropdown] = useState(false);
+  const [showThemeDropdown, setShowThemeDropdown] = useState(false);
   const [infoPopupContent, setInfoPopupContent] = useState<InfoContent | null>(null);
   const thinkingEnabled = inputSettings?.enable_thinking_mode ?? false;
   const thinkingQualityLevel = Math.max(1, Math.min(4, inputSettings?.thinking_quality_level ?? 1));
@@ -715,6 +786,7 @@ export function ClassicChatSettingsBar({
       setShowMemoryDropdown(false);
       setShowThinkingDropdown(false);
       setShowDisableSettingsDropdown(false);
+      setShowThemeDropdown(false);
     }
   }, [settingsOpen]);
 
@@ -750,6 +822,22 @@ export function ClassicChatSettingsBar({
               role="dialog"
             >
               <div className="classic-settings-popup-scroll">
+                <ClassicThemePickerItem
+                  chatThemeId={chatThemeId}
+                  expanded={showThemeDropdown}
+                  onExpandedChange={setShowThemeDropdown}
+                  onInfoClick={() =>
+                    openInfo({
+                      title: '界面主题',
+                      description:
+                        '选择网页聊天界面的视觉风格：现代（极简纯黑）、开发者（等宽终端风）、玻璃（毛玻璃半透明）。设置会自动保存在本地浏览器，刷新后依旧生效。'
+                    })
+                  }
+                  onSelectTheme={onSelectChatTheme}
+                />
+
+                <div className="classic-settings-divider" />
+
                 <ClassicModelSelectorItem
                   expanded={showModelDropdown}
                   loading={modelSelectorLoading}

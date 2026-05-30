@@ -1,6 +1,7 @@
 export type ChatSender = 'user' | 'assistant' | 'summary' | 'system';
 export type ChatStyle = 'bubble' | 'cursor';
 export type InputStyle = 'classic' | 'agent';
+export type ChatThemeId = 'modern' | 'developer' | 'glass';
 export type InputProcessingStage = 'idle' | 'connecting' | 'uploading' | 'streaming';
 
 export interface WebCapabilities {

@@ -1,0 +1,1 @@
+- [Web-chat interface themes](web-chat-themes.md) — selectable local themes layer over server theme via TS preset merge + data-theme CSS; inline vars beat stylesheets.

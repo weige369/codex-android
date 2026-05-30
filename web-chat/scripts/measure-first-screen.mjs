@@ -26,6 +26,7 @@ import {
 } from 'node:fs';
 import { dirname, resolve, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { diffFirstScreenChunks, formatGzipDelta } from './first-screen-diff.mjs';
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const projectRoot = resolve(scriptDir, '..');
@@ -235,26 +236,39 @@ if (summaryMode) {
       )}% 即判定回归。`
     );
     lines.push('');
-    lines.push('| chunk | raw | gzip | brotli |');
-    lines.push('| --- | ---: | ---: | ---: |');
-    for (const item of firstScreenJs) {
+    // Per-chunk gzip delta vs baseline so a reviewer can see *which* chunk
+    // moved, not just that the total did. Match by logical key (hash stripped)
+    // so per-build hash churn isn't mistaken for chunks being removed/added.
+    const baseFirstScreenChunks = [
+      ...(sBaseline.firstScreen?.js ?? []),
+      ...(sBaseline.firstScreen?.css ? [sBaseline.firstScreen.css] : [])
+    ];
+    const curFirstScreenChunks = [...firstScreenJs, ...(cssFile ? [cssFile] : [])];
+    const { rows: chunkRows, removed: removedChunks } = diffFirstScreenChunks(
+      curFirstScreenChunks,
+      baseFirstScreenChunks
+    );
+
+    lines.push('| chunk | raw | gzip | brotli | Δ gzip vs base |');
+    lines.push('| --- | ---: | ---: | ---: | ---: |');
+    for (const row of chunkRows) {
+      const tag = row.status === 'new' ? ' 🆕' : '';
       lines.push(
-        `| ${item.name} | ${fmtKB(item.sizes.raw)} | ${fmtKB(item.sizes.gzip)} | ${fmtKB(
-          item.sizes.brotli
-        )} |`
+        `| ${row.name}${tag} | ${fmtKB(row.sizes.raw)} | ${fmtKB(row.sizes.gzip)} | ${fmtKB(
+          row.sizes.brotli
+        )} | ${formatGzipDelta(row.deltaGzip)} |`
       );
     }
-    if (cssFile) {
-      lines.push(
-        `| ${cssFile.name} | ${fmtKB(cssFile.sizes.raw)} | ${fmtKB(
-          cssFile.sizes.gzip
-        )} | ${fmtKB(cssFile.sizes.brotli)} |`
-      );
+    // Surface baseline chunks that vanished so a size drop is explained.
+    for (const row of removedChunks) {
+      lines.push(`| ~~${row.key}~~ (removed) | — | — | — | ${formatGzipDelta(row.deltaGzip)} |`);
     }
+    const baseCriticalGzip = sBaseline.firstScreen?.criticalTotal?.gzip ?? 0;
+    const criticalDelta = firstScreenCritical.gzip - baseCriticalGzip;
     lines.push(
       `| **critical total** | **${fmtKB(firstScreenCritical.raw)}** | **${fmtKB(
         firstScreenCritical.gzip
-      )}** | **${fmtKB(firstScreenCritical.brotli)}** |`
+      )}** | **${fmtKB(firstScreenCritical.brotli)}** | **${formatGzipDelta(criticalDelta)}** |`
     );
     lines.push('');
     lines.push('估算首屏传输时间（仅网络传输，不含解析/执行）：');

@@ -36,7 +36,8 @@ Checks include:
 5. **Gradle Kotlin DSL syntax** - Use `it` not `details` in `eachDependency` blocks
 
 ### Build Commands
-- `./gradlew assembleDebug` - Build debug APK
+- `./gradlew :app:assembleDebug` - Build only the app module (recommended)
+- `./gradlew assembleDebug` - Build all projects (requires NDK for quickjs native build)
 - Prefer pushing to GitHub Actions for CI build (no local Android SDK required)
 
 ## Module Structure

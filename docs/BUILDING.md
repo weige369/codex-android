@@ -239,6 +239,8 @@ npm --prefix web-chat run build && npm --prefix web-chat run measure:check
 
 `measure:check` 会对比 `web-chat/perf/first-screen-baseline.json` 中保存的基线，如果首屏 gzip JS 体积增长超过 5%，校验会以非零退出码失败并给出明确提示，从而在合入前拦截首屏体积回归。
 
+同样的检查也通过 GitHub Actions（`.github/workflows/web-chat-first-screen.yml`）在每个 Pull Request 上运行，对应的检查名为 **`Web Chat First-Screen Budget`**，并已在 `main` 分支被设为**必过状态检查（required status check）**：检查未通过的 PR 无法合入 `main`。该工作流只有在 PR 改动 `web-chat/**` 时才会真正构建并比对体积，其它 PR 会直接通过这项检查，因此不会因为路径过滤而把无关 PR 永久卡住。
+
 如果某次体积增长是预期内的（例如有意引入的新功能），请在 `web-chat` 构建之后刷新基线，并把更新后的基线文件一并提交：
 
 ```bash

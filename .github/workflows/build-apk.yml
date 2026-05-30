@@ -85,7 +85,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: bash
-      - name: Decode release keystore
+      - name: Decode and validate release keystore
         id: signing
         if: steps.changes.outputs.changed == 'true'
         env:
@@ -93,26 +93,32 @@ jobs:
           RELEASE_STORE_PASSWORD: ${{ secrets.RELEASE_STORE_PASSWORD }}
           RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
           RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
-        run: |
-          # Only sign a release build when ALL signing secrets are present.
-          # Forks / PRs without secret access fall back to a debug build so the
-          # gate still verifies the project compiles.
+                run: |
           if [ -n "$RELEASE_KEYSTORE_BASE64" ] && [ -n "$RELEASE_STORE_PASSWORD" ] \
              && [ -n "$RELEASE_KEY_ALIAS" ] && [ -n "$RELEASE_KEY_PASSWORD" ]; then
             KEYSTORE_PATH="$RUNNER_TEMP/release-keystore.jks"
             echo "$RELEASE_KEYSTORE_BASE64" | base64 -d > "$KEYSTORE_PATH"
-            # build.gradle.kts reads these from local.properties.
-            {
-              echo "RELEASE_STORE_FILE=$KEYSTORE_PATH"
-              echo "RELEASE_STORE_PASSWORD=$RELEASE_STORE_PASSWORD"
-              echo "RELEASE_KEY_ALIAS=$RELEASE_KEY_ALIAS"
-              echo "RELEASE_KEY_PASSWORD=$RELEASE_KEY_PASSWORD"
-            } >> local.properties
-            echo "signed=true" >> "$GITHUB_OUTPUT"
-            echo "Release signing configured."
+            # Validate keystore before committing to release build
+            keytool -list -keystore "$KEYSTORE_PATH" \
+              -storepass "$RELEASE_STORE_PASSWORD" \
+              -alias "$RELEASE_KEY_ALIAS" > /dev/null 2>&1
+            KEYTOOL_EXIT=$?
+            if [ "$KEYTOOL_EXIT" -eq 0 ]; then
+              {
+                echo "RELEASE_STORE_FILE=$KEYSTORE_PATH"
+                echo "RELEASE_STORE_PASSWORD=$RELEASE_STORE_PASSWORD"
+                echo "RELEASE_KEY_ALIAS=$RELEASE_KEY_ALIAS"
+                echo "RELEASE_KEY_PASSWORD=$RELEASE_KEY_PASSWORD"
+              } >> local.properties
+              echo "signed=true" >> "$GITHUB_OUTPUT"
+              echo "Release signing configured and validated."
+            else
+              echo "signed=false" >> "$GITHUB_OUTPUT"
+              echo "WARNING: Keystore validation failed. Building unsigned debug APK."
+            fi
           else
             echo "signed=false" >> "$GITHUB_OUTPUT"
-            echo "No signing secrets available; falling back to a debug build."
+            echo "No signing secrets available; building unsigned debug APK."
           fi
         shell: bash
       - name: Install platforms and NDK
